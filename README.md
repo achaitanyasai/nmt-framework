@@ -7,7 +7,7 @@ More detailed documentation will be added very soon.
 
 ## Results
 | Language  | baseline  | Adagram initialized embeddings (K=3) |
-|---|---|
+|---|---|---|
 | English - Hindi  | TODO  | **29.05** |
 | Hindi - English  | TODO  | TODO |
 | English - Telugu  | TODO  | TODO |
