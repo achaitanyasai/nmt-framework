@@ -196,17 +196,17 @@ class CustomEncoder(nn.Module):
             pad_token
         )
 
-        # self.embeddings4 = nn.Embedding(
-        #     vocab_size,
-        #     embedding_dim,
-        #     pad_token
-        # )
+        self.embeddings4 = nn.Embedding(
+            vocab_size,
+            embedding_dim,
+            pad_token
+        )
 
-        # self.embeddings5 = nn.Embedding(
-        #     vocab_size,
-        #     embedding_dim,
-        #     pad_token
-        # )
+        self.embeddings5 = nn.Embedding(
+            vocab_size,
+            embedding_dim,
+            pad_token
+        )
         
 
         # self.reform_h = nn.Sequential(
@@ -317,14 +317,19 @@ class CustomEncoder(nn.Module):
         emb1 = self.embeddings1(cur_input)
         emb2 = self.embeddings2(cur_input)
         emb3 = self.embeddings3(cur_input)
+        emb4 = self.embeddings4(cur_input)
+        emb5 = self.embeddings5(cur_input)
 
         context = context.squeeze(0)
 
         emb_a = self.to_scalar(torch.tanh(self.embedding_l1(emb1) + self.context_h1(context)))
         emb_b = self.to_scalar(torch.tanh(self.embedding_l1(emb2) + self.context_h1(context)))
         emb_c = self.to_scalar(torch.tanh(self.embedding_l1(emb3) + self.context_h1(context)))
-        sc = self.softmax(torch.cat([emb_a, emb_b, emb_c], dim = 1)).unsqueeze(1)
-        emb = torch.cat([emb1.unsqueeze(2), emb2.unsqueeze(2), emb3.unsqueeze(2)], dim=2).transpose(1, 2)
+        emb_d = self.to_scalar(torch.tanh(self.embedding_l1(emb4) + self.context_h1(context)))
+        emb_e = self.to_scalar(torch.tanh(self.embedding_l1(emb5) + self.context_h1(context)))
+
+        sc = self.softmax(torch.cat([emb_a, emb_b, emb_c, emb_d, emb_e], dim = 1)).unsqueeze(1)
+        emb = torch.cat([emb1.unsqueeze(2), emb2.unsqueeze(2), emb3.unsqueeze(2), emb4.unsqueeze(2), emb5.unsqueeze(2)], dim=2).transpose(1, 2)
         res = torch.bmm(sc, emb).squeeze(1)
         return res, penalty
 

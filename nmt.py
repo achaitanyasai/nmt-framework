@@ -236,7 +236,7 @@ def get_model(args, source_data, target_data):
         embedding_dim = 100,
         pad_token = source_data.word2idx['PAD'], 
         ngrams_vocab_size = source_data.n_hashes,
-        dropout = 0.4,
+        dropout = args.dropout,
         ngram_pad_token = 0).cuda()
 
     logger.info('Building decoder')    
@@ -250,7 +250,7 @@ def get_model(args, source_data, target_data):
         embedding_dim = 500,
         pad_token = target_data.word2idx['PAD'],
         attn_type = 'general',
-        dropout = 0.4,
+        dropout = args.dropout,
         ngram_pad_token = 0).cuda()
     
     model = seq2seq_attn.Seq2SeqAttention(encoder, decoder).cuda()
@@ -259,8 +259,8 @@ def get_model(args, source_data, target_data):
     for p in model.parameters():
         p.data.uniform_(-0.1, 0.1)
     
-    with open('/home/chaitanya/Research/Adagram_data/rawdata/sorted_emb1.txt') as f:
-        print 'Reading sorted_emb1.txt'
+    with open('/home/chaitanya/Research/Adagram_data/rawdata/emb1.txt') as f:
+        print 'Reading emb1.txt'
         o = 0
         for j, line in enumerate(f.readlines()):
             if j == 0:
@@ -274,9 +274,11 @@ def get_model(args, source_data, target_data):
                     continue
                 idx = source_data.word2idx[word]
                 model.encoder.embeddings1.weight.data[idx] = torch.tensor(wv).cuda()
-    with open('/home/chaitanya/Research/Adagram_data/rawdata/sorted_emb2.txt') as f:
-        print 'Reading sorted_emb2.txt'
-        o1 = 0
+        print o
+        
+    with open('/home/chaitanya/Research/Adagram_data/rawdata/emb2.txt') as f:
+        print 'Reading emb2.txt'
+        o = 0
         for j, line in enumerate(f.readlines()):
             if j == 0:
                 continue
@@ -284,14 +286,16 @@ def get_model(args, source_data, target_data):
             word = cur[0]
             wv = map(float, cur[1::])
             if word in source_data.word2idx:
-                o1 += 1
+                o += 1
                 idx = source_data.word2idx[word]
                 if 0 == wv[0] and 0 == wv[1] and 0 == wv[2] and 0 == wv[3]:
                     continue
                 model.encoder.embeddings2.weight.data[idx] = torch.tensor(wv).cuda()
-    with open('/home/chaitanya/Research/Adagram_data/rawdata/sorted_emb3.txt') as f:
-        print 'Reading sorted emb3.txt'
-        o2 = 0
+        print o
+        
+    with open('/home/chaitanya/Research/Adagram_data/rawdata/emb3.txt') as f:
+        print 'Reading emb3.txt'
+        o = 0
         for j, line in enumerate(f.readlines()):
             if j == 0:
                 continue
@@ -299,11 +303,46 @@ def get_model(args, source_data, target_data):
             word = cur[0]
             wv = map(float, cur[1::])
             if word in source_data.word2idx:
-                o2 += 1
+                o += 1
                 if 0 == wv[0] and 0 == wv[1] and 0 == wv[2] and 0 == wv[3]:
                     continue
                 idx = source_data.word2idx[word]
                 model.encoder.embeddings3.weight.data[idx] = torch.tensor(wv).cuda()
+        print o
+        
+    with open('/home/chaitanya/Research/Adagram_data/rawdata/emb4.txt') as f:
+        print 'Reading emb4.txt'
+        o = 0
+        for j, line in enumerate(f.readlines()):
+            if j == 0:
+                continue
+            cur = line.strip().split(' ')
+            word = cur[0]
+            wv = map(float, cur[1::])
+            if word in source_data.word2idx:
+                o += 1
+                if 0 == wv[0] and 0 == wv[1] and 0 == wv[2] and 0 == wv[3]:
+                    continue
+                idx = source_data.word2idx[word]
+                model.encoder.embeddings4.weight.data[idx] = torch.tensor(wv).cuda()
+        print o
+        
+    with open('/home/chaitanya/Research/Adagram_data/rawdata/emb5.txt') as f:
+        print 'Reading emb5.txt'
+        o = 0
+        for j, line in enumerate(f.readlines()):
+            if j == 0:
+                continue
+            cur = line.strip().split(' ')
+            word = cur[0]
+            wv = map(float, cur[1::])
+            if word in source_data.word2idx:
+                o += 1
+                if 0 == wv[0] and 0 == wv[1] and 0 == wv[2] and 0 == wv[3]:
+                    continue
+                idx = source_data.word2idx[word]
+                model.encoder.embeddings5.weight.data[idx] = torch.tensor(wv).cuda()
+        print o
 
     logger.info(model)
     return None, None, model
@@ -445,7 +484,7 @@ def train_model(args, model, train_criterion, valid_criterion, optimizer,
         experiment.log_metric("valid bleu score", bleu_score, step=epoch)
         logger.info(msg)
 
-        if(bleu_score > best_bleu_sofar):
+        if(bleu_score >= best_bleu_sofar):
             logger.info('Saving model')            
             torch.save(model, args.saveTo)
         torch.save(model, './data/model_epoch_%d_valid_ppl_%.4f_bleu_%.4f_.pt' % (epoch, valid_stats.perplexity(), bleu_score))

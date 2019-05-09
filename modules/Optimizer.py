@@ -83,12 +83,12 @@ class Optimizer(object):
         Decay learning rate if val perf does not improve
         or we hit the start_decay_at limit.
         """
-        if ppl > self.last_ppl and epoch >= 15:
+        if ppl > self.last_ppl and epoch >= 10:
             self.start_decay = True
             self.last_decayed = epoch
         else:
             if self.start_decay_at is not None and epoch >= self.start_decay_at:
-                if epoch - self.last_decayed >= 3:
+                if epoch - self.last_decayed >= 2:
                     self.start_decay = True
                     self.last_decayed = epoch
                 else:
