@@ -196,17 +196,17 @@ class CustomEncoder(nn.Module):
             pad_token
         )
 
-        # self.embeddings4 = nn.Embedding(
-        #     vocab_size,
-        #     embedding_dim,
-        #     pad_token
-        # )
+#        self.embeddings4 = nn.Embedding(
+#            vocab_size,
+#            embedding_dim,
+#            pad_token
+#        )
 
-        # self.embeddings5 = nn.Embedding(
-        #     vocab_size,
-        #     embedding_dim,
-        #     pad_token
-        # )
+#        self.embeddings5 = nn.Embedding(
+#            vocab_size,
+#            embedding_dim,
+#            pad_token
+#        )
         
 
         # self.reform_h = nn.Sequential(
@@ -313,16 +313,21 @@ class CustomEncoder(nn.Module):
 
     def embedding_attention(self, cur_input, context):
         penalty = None
-        b_size = cur_input.shape[0]
-        emb1 = self.embeddings1(cur_input)
-        emb2 = self.embeddings2(cur_input)
-        emb3 = self.embeddings3(cur_input)
+        b_size = cur_input[0].shape[0]
+        emb1 = cur_input[0] #self.embeddings1(cur_input)
+        emb2 = cur_input[1] #self.embeddings2(cur_input)
+        emb3 = cur_input[2] #self.embeddings3(cur_input)
+        #emb4 = self.embeddings4(cur_input)
+        #emb5 = self.embeddings5(cur_input)
 
         context = context.squeeze(0)
 
         emb_a = self.to_scalar(torch.tanh(self.embedding_l1(emb1) + self.context_h1(context)))
         emb_b = self.to_scalar(torch.tanh(self.embedding_l1(emb2) + self.context_h1(context)))
         emb_c = self.to_scalar(torch.tanh(self.embedding_l1(emb3) + self.context_h1(context)))
+        #emb_d = self.to_scalar(torch.tanh(self.embedding_l1(emb4) + self.context_h1(context)))
+        #emb_e = self.to_scalar(torch.tanh(self.embedding_l1(emb5) + self.context_h1(context)))
+
         sc = self.softmax(torch.cat([emb_a, emb_b, emb_c], dim = 1)).unsqueeze(1)
         emb = torch.cat([emb1.unsqueeze(2), emb2.unsqueeze(2), emb3.unsqueeze(2)], dim=2).transpose(1, 2)
         res = torch.bmm(sc, emb).squeeze(1)
@@ -343,6 +348,9 @@ class CustomEncoder(nn.Module):
             # assert input.shape[1] == charngrams_emb.shape[1]
             # input = self.fusion(input, charngrams_emb)
             s_len, n_batch = input.size()
+            input1 = self.embeddings1(input)
+            input2 = self.embeddings2(input)
+            input3 = self.embeddings3(input)
             # assert(embedding_dim == self.embedding_dim)
             pass
         
@@ -365,7 +373,14 @@ class CustomEncoder(nn.Module):
         for i in range(s_len):
             while j >= 0 and lengths[j] < i + 1:
                 j -= 1
-            cur_input = input[i][:j + 1]
+            if layer_num == 0:
+                cur_input = (
+                    input1[i][:j + 1],
+                    input2[i][:j + 1],
+                    input3[i][:j + 1]
+                )
+            else:
+                cur_input = input[i][: j + 1]
             h_0 = h_0[:,:j + 1,:]
             c_0 = c_0[:,:j + 1,:]
             if layer_num == 0:

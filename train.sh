@@ -1,5 +1,17 @@
 #!/bin/bash
 
+#SBATCH -A research
+#SBATCH -n 32
+#SBATCH --gres=gpu:4
+#SBATCH --mem-per-cpu=2048
+#SBATCH --time=4-00:00:00
+#SBATCH --mail-type=END
+module load opencv/3.3.0
+module load cuda/8.0
+module load cudnn/5.1-cuda-8.0
+
+source ../venv/bin/activate
+
 check_and_exit () {
     if [ $? -ne 0 ]; then
         exit 0
@@ -12,18 +24,21 @@ train="yes"
 test="yes"
 bleu="yes"
 
-dataDir="./dataset/"
-src="en"
-trg="hn"
+dataDir="../dataset/"
+src="de"
+trg="en"
 
 srcFile="$dataDir/train.$src"
 trgFile="$dataDir/train.$trg"
 
-srcValFile="$dataDir/valid.$src"
-trgValFile="$dataDir/valid.$trg"
+srcValFile="$dataDir/dev/newstest2015.tc.$src"
+trgValFile="$dataDir/dev/newstest2015.tc.$trg"
 
-srcTestFile="$dataDir/test.$src"
-trgTestFile="$dataDir/test.$trg"
+srcTestFile1="$dataDir/dev/newstest2016.tc.$src"
+srcTestFile2="$dataDir/dev/newstest2017.tc.$src"
+
+trgTestFile1="$dataDir/dev/newstest2016.tc.$trg"
+trgTestFile2="$dataDir/dev/newstest2017.tc.$trg"
 
 if [ "$unittests" = "yes" ]; then
 echo "Running unittests"
@@ -45,23 +60,23 @@ python nmt.py \
    --datasets_valid "$srcValFile $trgValFile" \
    --src_maxlen 50 \
    --tgt_maxlen 50 \
-   --batch_size 40 \
+   --batch_size 80 \
    --bidirectional \
    --enc_depth 2 \
    --dec_depth 2 \
-   --dropout 0.4 \
+   --dropout 0.2 \
    --lrate 1 \
    --optimizer sgd \
    --dispFreq 1000 \
    --sampleFreq 0 \
-   --max_epochs 30 \
+   --max_epochs 12 \
    --sampleFreq 100000 \
    --evaluateFreq 1 \
    --src_max_word_len 30 \
    --tgt_max_word_len 30 \
-   --src_max_vocab_size 26970 \
-   --tgt_max_vocab_size 36797 \
-   --start_decay_at 18 \
+   --src_max_vocab_size 70000 \
+   --tgt_max_vocab_size 70000 \
+   --start_decay_at 6 \
    --saveTo ./data/model.pt \
    --max_number_of_sentences_allowed 10000000000000
 fi
@@ -70,8 +85,16 @@ check_and_exit
 if [ "$test" = "yes" ]; then
 echo "Predicting"
 python2.7 translate.py \
-    --input $srcTestFile \
-    --output ./data/predicted.txt \
+    --input $srcTestFile1 \
+    --output ./data/predicted1.txt \
+    --model ./data/model.pt \
+    --beam_size 10 \
+    --replace_unk \
+    --batch_size 1
+
+python2.7 translate.py \
+    --input $srcTestFile2 \
+    --output ./data/predicted2.txt \
     --model ./data/model.pt \
     --beam_size 10 \
     --replace_unk \
@@ -80,5 +103,106 @@ fi
 check_and_exit
 
 if [ "$bleu" = "yes" ]; then
-./scripts/bleu-1.04.pl $trgTestFile < ./data/predicted.txt
+./scripts/bleu-1.04.pl $trgTestFile1 < ./data/predicted1.txt > ./data/bleu_2016.txt
+./scripts/bleu-1.04.pl $trgTestFile2 < ./data/predicted2.txt > ./data/bleu_2017.txt
 fi
+
+echo "Saving files"
+mkdir -p "../trained_models/$src-2-$trg-baseline"
+cp -r ./data/*.txt "../trained_models/$src-2-$trg-baseline/"
+cp -r ./data/model.pt "../trained_models/$src-2-$trg-baseline/"
+
+
+unittests="no"
+clean="no"
+train="no"
+test="no"
+bleu="no"
+
+dataDir="../dataset/"
+src="de"
+trg="en"
+
+srcFile="$dataDir/train.$src"
+trgFile="$dataDir/train.$trg"
+
+srcValFile="$dataDir/dev/newstest2015.tc.$src"
+trgValFile="$dataDir/dev/newstest2015.tc.$trg"
+
+srcTestFile1="$dataDir/dev/newstest2016.tc.$src"
+srcTestFile2="$dataDir/dev/newstest2017.tc.$src"
+
+trgTestFile1="$dataDir/dev/newstest2016.tc.$trg"
+trgTestFile2="$dataDir/dev/newstest2017.tc.$trg"
+
+if [ "$unittests" = "yes" ]; then
+echo "Running unittests"
+python2.7 -W ignore -m unittest discover -v -f
+fi
+
+check_and_exit
+
+if [ "$clean" = "yes" ]; then
+echo "Cleaning ./data/"
+rm -rf ./data/*
+fi 
+check_and_exit
+
+# Use CUDA_LAUNCH_BLOCKING=1 for debugging
+if [ "$train" = "yes" ]; then
+python nmt.py \
+   --datasets "$srcFile $trgFile" \
+   --datasets_valid "$srcValFile $trgValFile" \
+   --src_maxlen 50 \
+   --tgt_maxlen 50 \
+   --batch_size 80 \
+   --bidirectional \
+   --enc_depth 2 \
+   --dec_depth 2 \
+   --dropout 0.3 \
+   --lrate 1 \
+   --optimizer sgd \
+   --dispFreq 1000 \
+   --sampleFreq 0 \
+   --max_epochs 12 \
+   --sampleFreq 100000 \
+   --evaluateFreq 1 \
+   --src_max_word_len 30 \
+   --tgt_max_word_len 30 \
+   --src_max_vocab_size 70000 \
+   --tgt_max_vocab_size 70000 \
+   --start_decay_at 6 \
+   --saveTo ./data/model.pt \
+   --max_number_of_sentences_allowed 10000000000000
+fi
+check_and_exit
+
+if [ "$test" = "yes" ]; then
+echo "Predicting"
+python2.7 translate.py \
+    --input $srcTestFile1 \
+    --output ./data/predicted1.txt \
+    --model ./data/model.pt \
+    --beam_size 10 \
+    --replace_unk \
+    --batch_size 1
+
+python2.7 translate.py \
+    --input $srcTestFile2 \
+    --output ./data/predicted2.txt \
+    --model ./data/model.pt \
+    --beam_size 10 \
+    --replace_unk \
+    --batch_size 1
+fi
+check_and_exit
+
+if [ "$bleu" = "yes" ]; then
+./scripts/bleu-1.04.pl $trgTestFile1 < ./data/predicted1.txt > ./data/bleu_2016.txt
+./scripts/bleu-1.04.pl $trgTestFile2 < ./data/predicted2.txt > ./data/bleu_2017.txt
+fi
+
+#mkdir -p "../trained_models/$src-2-$trg-baseline"
+#cp -r ./data/*.txt "../trained_models/$src-2-$trg-baseline/"
+#cp -r ./data/model.pt "../trained_models/$src-2-$trg-baseline/"
+

@@ -7,19 +7,19 @@ Neural Machine Translation base module
 # Start from line 308 and then follow DFS
 # manner to understand the code structure.
 # Import comet_ml in the top of your file
-from comet_ml import Experiment
+# from comet_ml import Experiment
 
 # Create an experiment
-experiment = Experiment(api_key="G1Hu2kJ89qGE5sZ1cBNlrq6Hj",
-                        project_name="general", workspace="achaitanyasai",
-                        disabled=True)
+# experiment = Experiment(api_key="G1Hu2kJ89qGE5sZ1cBNlrq6Hj",
+#                         project_name="general", workspace="achaitanyasai",
+#                         disabled=True)
 
-experiment.log_asset(file_path='./models/seq2seq_attn.py', file_like_object=None, file_name='seq2seq_attn.py', overwrite=False)
-experiment.log_asset(file_path='./modules/Trainer.py', file_like_object=None, file_name='trainer.py', overwrite=False)
-experiment.log_asset(file_path='./data_iterator.py', file_like_object=None, file_name='data_iterator.py', overwrite=False)
-experiment.add_tag('Expt-8')
-experiment.add_tag('vector_space=2')
-experiment.add_tag('UNK percentage=5')
+# experiment.log_asset(file_path='./models/seq2seq_attn.py', file_like_object=None, file_name='seq2seq_attn.py', overwrite=False)
+# experiment.log_asset(file_path='./modules/Trainer.py', file_like_object=None, file_name='trainer.py', overwrite=False)
+# experiment.log_asset(file_path='./data_iterator.py', file_like_object=None, file_name='data_iterator.py', overwrite=False)
+# experiment.add_tag('Expt-8')
+# experiment.add_tag('vector_space=2')
+# experiment.add_tag('UNK percentage=5')
 # experiment.add_tag('Baseline')
 
 import argparse
@@ -236,7 +236,7 @@ def get_model(args, source_data, target_data):
         embedding_dim = 100,
         pad_token = source_data.word2idx['PAD'], 
         ngrams_vocab_size = source_data.n_hashes,
-        dropout = 0.4,
+        dropout = 0.3,
         ngram_pad_token = 0).cuda()
 
     logger.info('Building decoder')    
@@ -250,7 +250,7 @@ def get_model(args, source_data, target_data):
         embedding_dim = 500,
         pad_token = target_data.word2idx['PAD'],
         attn_type = 'general',
-        dropout = 0.4,
+        dropout = 0.3,
         ngram_pad_token = 0).cuda()
     
     model = seq2seq_attn.Seq2SeqAttention(encoder, decoder).cuda()
@@ -259,8 +259,8 @@ def get_model(args, source_data, target_data):
     for p in model.parameters():
         p.data.uniform_(-0.1, 0.1)
     
-    with open('/home/chaitanya/Research/Adagram_data/rawdata/sorted_emb1.txt') as f:
-        print 'Reading sorted_emb1.txt'
+    with open('../dataset/adagram_vectors/emb1.txt') as f:
+        print 'Reading emb1.txt'
         o = 0
         for j, line in enumerate(f.readlines()):
             if j == 0:
@@ -274,8 +274,8 @@ def get_model(args, source_data, target_data):
                     continue
                 idx = source_data.word2idx[word]
                 model.encoder.embeddings1.weight.data[idx] = torch.tensor(wv).cuda()
-    with open('/home/chaitanya/Research/Adagram_data/rawdata/sorted_emb2.txt') as f:
-        print 'Reading sorted_emb2.txt'
+    with open('../dataset/adagram_vectors/emb2.txt') as f:
+        print 'Reading emb2.txt'
         o1 = 0
         for j, line in enumerate(f.readlines()):
             if j == 0:
@@ -289,8 +289,8 @@ def get_model(args, source_data, target_data):
                 if 0 == wv[0] and 0 == wv[1] and 0 == wv[2] and 0 == wv[3]:
                     continue
                 model.encoder.embeddings2.weight.data[idx] = torch.tensor(wv).cuda()
-    with open('/home/chaitanya/Research/Adagram_data/rawdata/sorted_emb3.txt') as f:
-        print 'Reading sorted emb3.txt'
+    with open('../dataset/adagram_vectors/emb3.txt') as f:
+        print 'Reading emb3.txt'
         o2 = 0
         for j, line in enumerate(f.readlines()):
             if j == 0:
@@ -304,7 +304,11 @@ def get_model(args, source_data, target_data):
                     continue
                 idx = source_data.word2idx[word]
                 model.encoder.embeddings3.weight.data[idx] = torch.tensor(wv).cuda()
-
+    
+    print(o)
+    print(o1)
+    print(o2)
+    
     logger.info(model)
     return None, None, model
 
@@ -423,16 +427,16 @@ def train_model(args, model, train_criterion, valid_criterion, optimizer,
         msg = ('=' * 80) + '\nEpoch: %d, Train Loss: %.3f, Train Accuracy: %.3f, Train Perplexity: %.3f'
         msg = msg % (epoch, train_stats._loss(), train_stats.accuracy(), train_stats.perplexity())
         logger.info(msg)
-        experiment.log_metric("train loss", train_stats._loss(), step=epoch)
-        experiment.log_metric("train accuracy", train_stats.accuracy(), step=epoch)
+        # experiment.log_metric("train loss", train_stats._loss(), step=epoch)
+        # experiment.log_metric("train accuracy", train_stats.accuracy(), step=epoch)
 
         # Validate the model on validation set
         valid_data_iterator.reset()
         valid_stats = trainer.validate(args, valid_data_iterator, source_data, target_data)
         msg = 'Epoch: %d, Valid Loss: %.3f, Valid Accuracy: %.3f, Valid Perplexity: %.3f'
         msg = msg % (epoch,valid_stats._loss(),valid_stats.accuracy(),valid_stats.perplexity())
-        experiment.log_metric("valid loss", valid_stats._loss(), step=epoch)
-        experiment.log_metric("valid accuracy", valid_stats.accuracy(), step=epoch)
+        # experiment.log_metric("valid loss", valid_stats._loss(), step=epoch)
+        # experiment.log_metric("valid accuracy", valid_stats.accuracy(), step=epoch)
         
         logger.info(msg)
         valid_data_iterator.reset()
@@ -442,7 +446,7 @@ def train_model(args, model, train_criterion, valid_criterion, optimizer,
         
         msg = 'Epoch: %d, Valid BLEU Score: %.4f, Best BLEU Score: %.4f'
         msg = msg % (epoch, bleu_score, max(bleu_score, best_bleu_sofar))
-        experiment.log_metric("valid bleu score", bleu_score, step=epoch)
+        # experiment.log_metric("valid bleu score", bleu_score, step=epoch)
         logger.info(msg)
 
         if(bleu_score > best_bleu_sofar):
