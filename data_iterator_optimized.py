@@ -46,7 +46,7 @@ class Lang(object):
                 max_number_of_sentences_allowed = 100000000000):
         if verbose:
             logger.info('Reading %s (%s language)' % (fname, langtype))
-        self.ignore_too_many_unknowns = ignore_too_many_unknowns
+        self.ignore_too_many_unknowns = True #ignore_too_many_unknowns
         self.fname = fname + '.tmp'
         self.base_fname = fname
         self.langtype = langtype
@@ -92,13 +92,13 @@ class Lang(object):
 
         if self.verbose:
             for j, _ in enumerate(tqdm.tqdm(self.raw_data)):
-                sentence = _.strip().split()[:self.maxlen]
+                sentence = _.strip().split()[:self.maxlen + 10]
                 self.n_sentences += 1
                 for word in sentence:
                     self.addWord(word)
         else:
             for j, _ in enumerate(self.raw_data):
-                sentence = _.strip().split()[:self.maxlen]
+                sentence = _.strip().split()[:self.maxlen + 10]
                 self.n_sentences += 1
                 for word in sentence:
                     self.addWord(word)
@@ -154,7 +154,7 @@ class Lang(object):
             raise(StopIteration)
         else:
             self.sentidx += 1
-            return self.file_iterator.next().strip().split()[:self.max_sent_len]
+            return self.file_iterator.next().strip().split()[:self.max_sent_len + 10]
     
     def addWord(self, word):
         try:
@@ -328,7 +328,7 @@ class dataIterator(object):
     
     def next(self):
         if self.sentidx >= self.n_samples:
-            self.reset()
+            # self.reset()
             raise Exception('Stop')
         else:
             source_text = self.source_lang.next()
@@ -337,6 +337,13 @@ class dataIterator(object):
             else:
                 target_text = None
             self.sentidx += 1
+            
+            if self.source_lang.data_type == 'train':
+                #assert type(source_text) == type([])
+                #assert type(target_text) == type([])
+                if (len(source_text) >= self.source_lang.max_sent_len + 2) or (len(target_text) >= self.target_lang.max_sent_len + 2):
+                    return self.next()
+            
             return source_text, target_text, self.sentidx - 1
     
     def next_batch(self, batch_size, max_length, source_language_model = None, target_language_model = None, return_texts = False):
@@ -357,7 +364,7 @@ class dataIterator(object):
                 source_line, target_line, sentidx = self.next()
                 samples += 1
             except Exception as e:
-                break
+                continue
             source_lines_unsorted.append(source_line)
             source_lens_unsorted.append(len(source_line))
             sentences_indices_unsorted.append(sentidx)
@@ -365,6 +372,9 @@ class dataIterator(object):
             if target_line is not None:
                 target_lines_unsorted.append(target_line)
                 target_lens_unsorted.append(len(target_line))
+        
+        if len(source_lens_unsorted) == 0:
+            return None
         
         source_max_len = max(source_lens_unsorted)
         if len(target_lens_unsorted) > 0:

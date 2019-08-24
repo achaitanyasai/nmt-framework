@@ -13,8 +13,8 @@ test="yes"
 bleu="yes"
 
 dataDir="./dataset/"
-src="en"
-trg="hn"
+src="hn"
+trg="en"
 
 srcFile="$dataDir/train.$src"
 trgFile="$dataDir/train.$trg"
@@ -59,8 +59,8 @@ python nmt.py \
    --evaluateFreq 1 \
    --src_max_word_len 30 \
    --tgt_max_word_len 30 \
-   --src_max_vocab_size 26970 \
-   --tgt_max_vocab_size 36797 \
+   --src_max_vocab_size 36797 \
+   --tgt_max_vocab_size 26970 \
    --start_decay_at 18 \
    --saveTo ./data/model.pt \
    --max_number_of_sentences_allowed 10000000000000

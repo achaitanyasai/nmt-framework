@@ -52,13 +52,14 @@ class Translator(object):
                      global_scorer=self.global_scorer, pad=vocab['PAD'],
                      eos=vocab['EOS'], bos=vocab['SOS'], min_length=self.min_length)
                 for _ in range(batch_size)]
-        enc_states, context, penalty = self.model.encoder(src, lines_src_hashes, src_lengths)
+        enc_states, enc_rnn_input, context, penalty = self.model.encoder(src, lines_src_hashes, src_lengths)
         dec_states = self.model.decoder.init_decoder_state(src, context, enc_states)
         
         if src_lengths is None:
             src_lengths = torch.Tensor(batch_size).type_as(context.data).long().fill_(context.size(0))
                 
         context = utils.rvar(context.data, beam_size)
+        enc_rnn_input = utils.rvar(enc_rnn_input.data, beam_size)
         context_lengths = src_lengths.repeat(beam_size)
         dec_states.repeat_beam_size_times(beam_size)
 
@@ -74,7 +75,7 @@ class Translator(object):
                 #Unimplemented
             
             char_inp = None#self.get_char_features(inp)
-            dec_out, dec_states, attn, _ = self.model.decoder(inp, char_inp, context, dec_states, context_lengths = context_lengths)
+            dec_out, dec_states, attn, _ = self.model.decoder(inp, char_inp, enc_rnn_input, context, dec_states, context_lengths = context_lengths)
             dec_out = dec_out.squeeze(0)
 
             if not self.copy_attn:

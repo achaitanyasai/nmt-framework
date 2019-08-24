@@ -93,6 +93,14 @@ class encoder(nn.Module):
         assert(hidden_size % self.num_directions == 0)
         self.hidden_size = hidden_size // self.num_directions
 
+        self.embedding_rnn = getattr(nn, rnn_type)( #LSTM or GRU
+            input_size = embedding_dim, 
+            hidden_size = self.hidden_size, 
+            num_layers = num_layers, 
+            dropout = dropout,
+            bidirectional = self.bidirectional
+        )
+
         self.rnn = getattr(nn, rnn_type)( #LSTM or GRU
             input_size = embedding_dim, 
             hidden_size = self.hidden_size, 
@@ -101,20 +109,102 @@ class encoder(nn.Module):
             bidirectional = self.bidirectional
         )
 
-        self.embeddings = nn.Embedding(
+        self.global_embeddings = nn.Embedding(
             vocab_size,
             embedding_dim,
             pad_token
         )
 
-    def forward(self, input, input_hashes, lengths = None, hidden = None):
-        self.rnn.flatten_parameters()
+        self.emb1 = nn.Embedding(
+            vocab_size,
+            embedding_dim,
+            pad_token
+        )
+
+        self.emb2 = nn.Embedding(
+            vocab_size,
+            embedding_dim,
+            pad_token
+        )
+
+        self.emb3 = nn.Embedding(
+            vocab_size,
+            embedding_dim,
+            pad_token
+        )
+
+        self.embedding_l1 = nn.Linear(embedding_dim, hidden_size)
+        self.context_h1 = nn.Linear(hidden_size, hidden_size)
+        self.to_scalar = nn.Linear(hidden_size, 1)
+
+        self.softmax = nn.Softmax(dim=-1)
+        self.embedding_dropout = nn.Dropout(0.4)
+    
+    def get_embedding_context(self, input, lengths, hidden=None):
+        self.embedding_rnn.flatten_parameters()
         s_len, n_batch = input.size()[0], input.size()[1]
         if lengths is not None:
             n_batch_, = lengths.size()
             utils.aeq(n_batch, n_batch_)
         
-        emb = self.embeddings(input)
+        emb = self.global_embeddings(input)
+
+        s_len, batch, embedding_dim = emb.size()
+        assert(embedding_dim == self.embedding_dim)
+
+        #Packed seq. see:
+        # https://github.com/OpenNMT/OpenNMT-py/blob/master/onmt/Models.py#L131
+
+        packed_emb = emb
+        if lengths is not None:
+            lengths = lengths.view(-1).tolist()
+            packed_emb = pack(emb, lengths)
+        
+        outputs, hidden_t = self.embedding_rnn(packed_emb, hidden)
+        if lengths is not None:
+            outputs = unpack(outputs)[0]
+        
+        return outputs
+    
+    def embedding_attention(self, emb1, emb2, emb3, context):
+
+        s_len = emb1.shape[0]
+        b_size = emb1.shape[1]
+        emb_dim = emb1.shape[2]
+
+        res = []
+
+        for i in range(s_len):
+            s1 = self.to_scalar(torch.tanh(self.embedding_l1(emb1[i]) + self.context_h1(context[i])))
+            s2 = self.to_scalar(torch.tanh(self.embedding_l1(emb2[i]) + self.context_h1(context[i])))
+            s3 = self.to_scalar(torch.tanh(self.embedding_l1(emb3[i]) + self.context_h1(context[i])))
+
+            sc = self.softmax(torch.cat([s1, s2, s3], dim = 1)).unsqueeze(1)
+
+            emb = torch.cat([emb1[i].unsqueeze(2), emb2[i].unsqueeze(2), emb3[i].unsqueeze(2)], dim=2).transpose(1, 2)
+
+            cur_res = torch.bmm(sc, emb).squeeze(1)
+            res.append(cur_res)
+        
+        res = torch.stack(res)
+        return res
+    
+    def forward(self, input, input_hashes, lengths = None, hidden = None):
+
+        embedding_context = self.get_embedding_context(input, lengths)
+        
+        self.rnn.flatten_parameters()
+        s_len, n_batch = input.size()[0], input.size()[1]
+        if lengths is not None:
+            n_batch_, = lengths.size()
+            utils.aeq(n_batch, n_batch_)
+
+        emb1 = self.emb1(input)
+        emb2 = self.emb2(input)
+        emb3 = self.emb3(input)
+
+        emb = self.embedding_attention(emb1, emb2, emb3, embedding_context)
+        # emb = self.global_embeddings(input)
 
         s_len, batch, embedding_dim = emb.size()
         assert(embedding_dim == self.embedding_dim)
@@ -130,8 +220,13 @@ class encoder(nn.Module):
         outputs, hidden_t = self.rnn(packed_emb, hidden)
         if lengths is not None:
             outputs = unpack(outputs)[0]
+        
+        #############################################################
+        # TODO: Observe this line
+        # emb = self.embedding_dropout(emb)
+        #############################################################
 
-        return hidden_t, outputs, None
+        return hidden_t, emb, outputs, None
 
 class CustomEncoder(nn.Module):
     def __init__(
@@ -156,7 +251,7 @@ class CustomEncoder(nn.Module):
         self.num_layers = num_layers
         self.pad_token = pad_token
 
-        self.embedding_dim = 500#embedding_dim# + 128
+        self.embedding_dim = embedding_dim# + 128
         self.num_directions = 1 + bidirectional
         self.bidirectional = bidirectional
         assert hidden_size % self.num_directions == 0
@@ -178,50 +273,23 @@ class CustomEncoder(nn.Module):
             self.layers.append(layer)
             input_size = self.hidden_size * (1 + self.bidirectional)
     
-        self.embeddings1 = nn.Embedding(
+        self.emb1 = nn.Embedding(
             vocab_size,
             embedding_dim,
             pad_token
         )
 
-        self.embeddings2 = nn.Embedding(
+        self.emb2 = nn.Embedding(
             vocab_size,
             embedding_dim,
             pad_token
         )
 
-        self.embeddings3 = nn.Embedding(
+        self.emb3 = nn.Embedding(
             vocab_size,
             embedding_dim,
             pad_token
         )
-
-        # self.embeddings4 = nn.Embedding(
-        #     vocab_size,
-        #     embedding_dim,
-        #     pad_token
-        # )
-
-        # self.embeddings5 = nn.Embedding(
-        #     vocab_size,
-        #     embedding_dim,
-        #     pad_token
-        # )
-        
-
-        # self.reform_h = nn.Sequential(
-        #     nn.Linear(self.hidden_size, self.hidden_size, bias=False)
-        # )
-
-        # self.reform_emb = nn.Sequential(
-        #     nn.Linear(embedding_dim, self.hidden_size, bias=False)
-        # )
-
-        # self.get_weights = nn.Sequential(
-        #     nn.Linear(self.hidden_size + embedding_dim, self.hidden_size + embedding_dim),
-        #     nn.Tanh(),
-        #     nn.Linear(self.hidden_size + embedding_dim, 1)
-        # )
 
         self.embedding_l1 = nn.Linear(embedding_dim, self.hidden_size)
         self.context_h1 = nn.Linear(self.hidden_size, self.hidden_size)
@@ -233,6 +301,7 @@ class CustomEncoder(nn.Module):
         self.file_log_counter = 0
         f = open('/home/chaitanya/tmp.txt', 'w')
         f.close()
+        self.embedding_dropout = nn.Dropout(0.4)
     
     def reverse(self, inputs, lengths, batch_first=False):
         if batch_first:
@@ -266,7 +335,7 @@ class CustomEncoder(nn.Module):
             if layer_num + 1 == self.num_layers:
                 apply_dropout = False
             if self.bidirectional:
-                hidden_forward, outputs_forward, _penalty = self._forward(input, None, lengths, hidden, layer_num, True, apply_dropout)
+                hidden_forward, rnn_inputs_forward, outputs_forward, _penalty = self._forward(input, None, lengths, hidden, layer_num, True, apply_dropout)
                 if layer_num == 0:
                     if penalty is None:
                         penalty = _penalty
@@ -275,7 +344,7 @@ class CustomEncoder(nn.Module):
                 input_reverse = self.reverse(input, lengths)        
                 # input_hashes_reverse = self.reverse(input_hashes.transpose(0, 1), lengths).transpose(0, 1)
 
-                hidden_backward, outputs_backward, _penalty = self._forward(input_reverse, None, lengths, hidden, layer_num, False, apply_dropout)
+                hidden_backward, rnn_inputs_backward, outputs_backward, _penalty = self._forward(input_reverse, None, lengths, hidden, layer_num, False, apply_dropout)
                 if layer_num == 0:
                     if penalty is None:
                         penalty = _penalty
@@ -283,11 +352,19 @@ class CustomEncoder(nn.Module):
                         penalty = penalty + _penalty
 
                 outputs_backward = self.reverse(outputs_backward, lengths)
+                if layer_num == 0:
+                    rnn_inputs_backward = self.reverse(rnn_inputs_backward, lengths)
                 # if layer_num == 0:
                     # embedding_context_backward = self.reverse(embedding_context_backward, lengths)
                     # word_embeddings = embedding_context_forward + embedding_context_backward
                 outputs = torch.cat([outputs_forward, outputs_backward], 2)
                 input = outputs
+
+                if layer_num == 0:
+                    rnn_inputs = rnn_inputs_forward + rnn_inputs_backward
+                    
+                    rnn_inputs = self.embedding_dropout(rnn_inputs)
+
                 final_hidden_h.append(hidden_forward[0])
                 final_hidden_h.append(hidden_backward[0])
 
@@ -309,14 +386,14 @@ class CustomEncoder(nn.Module):
         final_hidden_c = torch.cat(final_hidden_c, 0)
         final_hidden = (final_hidden_h, final_hidden_c)
         # assert penalty is not None
-        return final_hidden, input, penalty
+        return final_hidden, rnn_inputs, input, penalty
 
     def embedding_attention(self, cur_input, context):
         penalty = None
-        b_size = cur_input.shape[0]
-        emb1 = self.embeddings1(cur_input)
-        emb2 = self.embeddings2(cur_input)
-        emb3 = self.embeddings3(cur_input)
+        # b_size = cur_input[0].shape[0] # cur_input.shape[0]
+        emb1 = cur_input[0] # self.embeddings1(cur_input)
+        emb2 = cur_input[1] # self.embeddings2(cur_input)
+        emb3 = cur_input[2] # self.embeddings3(cur_input)
 
         context = context.squeeze(0)
 
@@ -326,6 +403,7 @@ class CustomEncoder(nn.Module):
         sc = self.softmax(torch.cat([emb_a, emb_b, emb_c], dim = 1)).unsqueeze(1)
         emb = torch.cat([emb1.unsqueeze(2), emb2.unsqueeze(2), emb3.unsqueeze(2)], dim=2).transpose(1, 2)
         res = torch.bmm(sc, emb).squeeze(1)
+        
         return res, penalty
 
     def _forward(self, input, input_hashes, lengths = None, hidden = None, layer_num=0, forward_rnn=True, apply_dropout=False):
@@ -344,7 +422,9 @@ class CustomEncoder(nn.Module):
             # input = self.fusion(input, charngrams_emb)
             s_len, n_batch = input.size()
             # assert(embedding_dim == self.embedding_dim)
-            pass
+            emb1 = self.emb1(input)
+            emb2 = self.emb2(input)
+            emb3 = self.emb3(input)
         
         else:
             s_len, n_batch, embedding_dim = input.size()
@@ -360,16 +440,31 @@ class CustomEncoder(nn.Module):
         outputs = []
         final_h = Variable(torch.zeros(1, n_batch, self.hidden_size)).cuda()
         final_c = Variable(torch.zeros(1, n_batch, self.hidden_size)).cuda()
+        zero_pad = Variable(torch.zeros(1, self.embedding_dim)).cuda()
         penalty = None
+
+        rnn_inputs = []
 
         for i in range(s_len):
             while j >= 0 and lengths[j] < i + 1:
                 j -= 1
             cur_input = input[i][:j + 1]
+
             h_0 = h_0[:,:j + 1,:]
             c_0 = c_0[:,:j + 1,:]
             if layer_num == 0:
-                cur_input, cur_penalty = self.embedding_attention(cur_input, c_0)
+                inp = (
+                    emb1[i][:j + 1],
+                    emb2[i][:j + 1],
+                    emb3[i][:j + 1]
+                )
+                cur_input, cur_penalty = self.embedding_attention(inp, c_0)
+                cur_padded_input = cur_input
+                while cur_padded_input.shape[0] < n_batch:
+                    cur_padded_input = torch.cat([cur_padded_input, zero_pad], 0)
+                
+                rnn_inputs.append(cur_padded_input)
+
                 if penalty is None:
                     penalty = cur_penalty
                 else:
@@ -401,7 +496,9 @@ class CustomEncoder(nn.Module):
             final_outputs = [target] + final_outputs
         
         final_outputs = torch.cat(final_outputs, 0)
-        return (final_h, final_c), final_outputs, penalty
+        if layer_num == 0:
+            rnn_inputs = torch.stack(rnn_inputs)
+        return (final_h, final_c), rnn_inputs, final_outputs, penalty
 
 class decoderBase(nn.Module):
     '''
@@ -471,11 +568,17 @@ class decoderBase(nn.Module):
                 attn_type=self.attn_type
             )
             self._copy = True
+        
+        self.embedding_context_l1 = nn.Linear(self.hidden_size, self.hidden_size)
+        self.context_l1 = nn.Linear(self.hidden_size, self.hidden_size)
+        f = open('/home/chaitanya/tmp.txt', 'w')
+        f.close()
     
     def forward(
         self,
         input,
         input_charngrams,
+        embedding_context,
         context,
         state,
         context_lengths):
@@ -486,7 +589,7 @@ class decoderBase(nn.Module):
 
         utils.aeq(input_batch, context_batch)
 
-        hidden, outputs, attns, coverage = self._run_forward_pass(input, input_charngrams, context, state, context_lengths = context_lengths)
+        hidden, outputs, attns, coverage = self._run_forward_pass(input, input_charngrams, embedding_context, context, state, context_lengths = context_lengths)
 
         final_output = outputs[-1]
         state.update_state(hidden, final_output.unsqueeze(0), coverage.unsqueeze(0) if coverage is not None else None)
@@ -521,7 +624,7 @@ class decoder(decoderBase):
     '''
     Input feed decoder
     '''
-    def _run_forward_pass(self, input, input_hashes, context, state, context_lengths = None):
+    def _run_forward_pass(self, input, input_hashes, embedding_context, context, state, context_lengths = None):
         output = state.input_feed.squeeze(0)
         output_batch, _ = output.size()
         input_len, input_batch = input.size()
@@ -537,6 +640,27 @@ class decoder(decoderBase):
         if self._coverage:
             attns['coverage'] = []
         
+        # enc_seq_len = embedding_context.shape[0]
+        # b_size = embedding_context.shape[1]
+        # emb_dim = embedding_context.shape[2]
+
+        # w = []
+        # for i in range(enc_seq_len):
+        #     w.append(
+        #         torch.sigmoid(
+        #             self.embedding_context_l1(embedding_context[i]) + 
+        #             self.context_l1(context[i])
+        #         )
+        #     )
+
+        # w = torch.stack(w)
+        
+        # f = open('/home/chaitanya/tmp.txt', 'a+')
+        # f.write('===============\n%s\n===============\n' % (str(w)))
+        # f.close()
+
+        # context = (w * context) + ((1 - w) * embedding_context)
+
         # charngrams_emb = self.apply_cnn_charngrams(input_hashes, input_len, input_batch)        
         emb = self.embeddings(input)
         # assert(emb.shape[0] == charngrams_emb.shape[0])
@@ -604,8 +728,8 @@ class Seq2SeqAttention(nn.Module):
         #tgt_hashes = tgt_hashes.transpose(0, 1)
         #tgt_hashes = tgt_hashes[:-1]
         #tgt_hashes = tgt_hashes.transpose(0, 1)
-        enc_hidden, context, penalty = self.encoder(src, src_hashes, lengths)
+        enc_hidden, rnn_inputs, context, penalty = self.encoder(src, src_hashes, lengths)
         enc_state = self.decoder.init_decoder_state(src, context, enc_hidden)
         
-        out, dec_state, attns, predictions = self.decoder(tgt, tgt_hashes, context, enc_state, context_lengths = lengths)
+        out, dec_state, attns, predictions = self.decoder(tgt, tgt_hashes, rnn_inputs, context, enc_state, context_lengths = lengths)
         return out, attns, dec_state, predictions, penalty

@@ -233,7 +233,7 @@ def get_model(args, source_data, target_data):
         num_layers = args.enc_depth, 
         hidden_size = 500,
         vocab_size = source_data.n_words,
-        embedding_dim = 100,
+        embedding_dim = 500,
         pad_token = source_data.word2idx['PAD'], 
         ngrams_vocab_size = source_data.n_hashes,
         dropout = 0.4,
@@ -259,8 +259,8 @@ def get_model(args, source_data, target_data):
     for p in model.parameters():
         p.data.uniform_(-0.1, 0.1)
     
-    with open('/home/chaitanya/Research/Adagram_data/rawdata/sorted_emb1.txt') as f:
-        print 'Reading sorted_emb1.txt'
+    with open('/home/chaitanya/Research/ShataAnuvadak/_pytorch/all_indian_languages/data/monolingual/hindi/emb1.txt') as f:
+        print 'Reading emb1.txt'
         o = 0
         for j, line in enumerate(f.readlines()):
             if j == 0:
@@ -273,9 +273,9 @@ def get_model(args, source_data, target_data):
                 if 0 == wv[0] and 0 == wv[1] and 0 == wv[2] and 0 == wv[3]:
                     continue
                 idx = source_data.word2idx[word]
-                model.encoder.embeddings1.weight.data[idx] = torch.tensor(wv).cuda()
-    with open('/home/chaitanya/Research/Adagram_data/rawdata/sorted_emb2.txt') as f:
-        print 'Reading sorted_emb2.txt'
+                model.encoder.emb1.weight.data[idx] = torch.tensor(wv).cuda()
+    with open('/home/chaitanya/Research/ShataAnuvadak/_pytorch/all_indian_languages/data/monolingual/hindi/emb2.txt') as f:
+        print 'Reading emb2.txt'
         o1 = 0
         for j, line in enumerate(f.readlines()):
             if j == 0:
@@ -288,9 +288,9 @@ def get_model(args, source_data, target_data):
                 idx = source_data.word2idx[word]
                 if 0 == wv[0] and 0 == wv[1] and 0 == wv[2] and 0 == wv[3]:
                     continue
-                model.encoder.embeddings2.weight.data[idx] = torch.tensor(wv).cuda()
-    with open('/home/chaitanya/Research/Adagram_data/rawdata/sorted_emb3.txt') as f:
-        print 'Reading sorted emb3.txt'
+                model.encoder.emb2.weight.data[idx] = torch.tensor(wv).cuda()
+    with open('/home/chaitanya/Research/ShataAnuvadak/_pytorch/all_indian_languages/data/monolingual/hindi/emb3.txt') as f:
+        print 'Reading emb3.txt'
         o2 = 0
         for j, line in enumerate(f.readlines()):
             if j == 0:
@@ -303,8 +303,11 @@ def get_model(args, source_data, target_data):
                 if 0 == wv[0] and 0 == wv[1] and 0 == wv[2] and 0 == wv[3]:
                     continue
                 idx = source_data.word2idx[word]
-                model.encoder.embeddings3.weight.data[idx] = torch.tensor(wv).cuda()
-
+                model.encoder.emb3.weight.data[idx] = torch.tensor(wv).cuda()
+    
+    print(o)
+    print(o1)
+    print(o2)
     logger.info(model)
     return None, None, model
 

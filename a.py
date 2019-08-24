@@ -19,7 +19,7 @@ from torch import optim
 from torch.autograd import Variable
 from torch.nn.utils import clip_grad_norm
 
-import data_iterator
+import data_iterator_optimized as data_iterator
 import util
 import subprocess
 import logging.config
@@ -42,10 +42,32 @@ torch.cuda.manual_seed(3435)
 logger = logging.getLogger('simple_example')
 logger.setLevel(logging.DEBUG)
 
-src_lang = data_iterator.Lang('/tmp/in.src', 10, max_word_len_allowed=20, max_vocab_size=10000, langtype='source', chars = False, verbose=False, ignore_too_many_unknowns=True)
-tgt_lang = data_iterator.Lang('/tmp/in.tgt', 10, max_word_len_allowed=20, max_vocab_size=10000, langtype='target', chars = False, verbose=False, ignore_too_many_unknowns=True)
+src_lang = data_iterator.Lang('/tmp/in.src', 50, max_word_len_allowed=20, max_vocab_size=70000, langtype='source', chars = False, verbose=True, ignore_too_many_unknowns=True, max_number_of_sentences_allowed=10000000000)
+tgt_lang = data_iterator.Lang('/tmp/in.tgt', 50, max_word_len_allowed=20, max_vocab_size=70000, langtype='target', chars = False, verbose=True, ignore_too_many_unknowns=True, max_number_of_sentences_allowed=10000000000)
         
 iterator = data_iterator.dataIterator(src_lang, tgt_lang, shuffle = True)
+cur_batch = 0
+
+a = {}
+
+while cur_batch < iterator.n_samples:
+
+    batch = iterator.next_batch(80, None)
+    if not batch:
+        break
+    print('%d/%d, %d' % (cur_batch, iterator.n_samples, batch.batch_size))
+    for j in batch.src_raw:
+        try:
+            a[tuple(j)] += 1
+        except KeyError:
+            a[tuple(j)] = 1
+    cur_batch += batch.batch_size
+
+# for j in a:
+#     if a[j] != 1:
+#         print(j, a[j])
+print("OK")
+exit(0)
 N = 10
 i = 0
 while i < N:

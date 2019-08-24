@@ -51,6 +51,9 @@ class Trainer(object):
         cur_batch = 0
         while cur_batch < train_data_iterator.n_samples:
             batch = train_data_iterator.next_batch(args.batch_size, None)
+            if not batch:
+                break
+
             if self.norm_method == 'tokens':
                 #Loss normalization based on words
                 normalization += batch.src.data.contiguous().view(-1).ne(self.padding_idx).sum()
@@ -88,6 +91,8 @@ class Trainer(object):
         self.padding_idx = padding_idx
         while cur_batch < valid_data_iterator.n_samples:
             batch = valid_data_iterator.next_batch(batch_size, None, source_language_model = source_data, target_language_model = target_data)
+            if not batch:
+                break
             
             lines_src, lens_src = batch.src, batch.src_len
             lines_trg, lens_trg = batch.tgt, batch.tgt_len
@@ -123,6 +128,8 @@ class Trainer(object):
         self.padding_idx = padding_idx
         while cur_batch < valid_data_iterator.n_samples:
             batch = valid_data_iterator.next_batch(batch_size, None, source_language_model = source_data, target_language_model = target_data)
+            if not batch:
+                break
             
             lines_src, lens_src = batch.src, batch.src_len
             lines_trg, lens_trg = batch.tgt, batch.tgt_len
