@@ -7,10 +7,21 @@ General utils
 
 import pickle
 import subprocess
+import csv
 
 def fread(filename, mode='r'):
     f = open(filename)
-    return open(filename, mode).read().strip()
+    x = f.read().strip()
+    f.close()
+    return x
+
+def count_lines(filename):
+    csvFile = open(filename)
+    res = 0
+    for row in csv.reader(csvFile, delimiter=",", quotechar='"'):
+        res += 1
+    csvFile.close()
+    return res
 
 def write_pickle(obj, filename, *args):
     f = open(filename, 'wb')

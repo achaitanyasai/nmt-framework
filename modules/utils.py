@@ -107,11 +107,11 @@ def check_gradients(model, lr):
                 pass
             else:
                 # Vanishing gradient problem
-                print "==========="
-                print lr
-                print name
-                print update, param
+                print("===========")
+                print(lr)
+                print(name)
+                print(update, param)
                 print(update / param)
-                print "==========="
+                print("===========")
             if (update / param) < 1e-4:
                 raise Exception('Gradient too small')

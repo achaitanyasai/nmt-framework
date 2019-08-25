@@ -22,7 +22,7 @@ from torch import optim
 from torch.autograd import Variable
 from torch.nn.utils import clip_grad_norm
 
-import data_iterator_optimized as data_iterator
+import data_iterator
 import util
 from models import seq2seq_attn
 from modules import Beam, Loss, Optimizer, Trainer, Translator
@@ -120,7 +120,7 @@ def get_data(args):
     return source_data, target_data, source_data_test, None, data_iter, data_iter_test
 
 def load_model(args):
-    print args.model
+    print(args.model)
     model = torch.load(args.model)
     model.eval()
     return model

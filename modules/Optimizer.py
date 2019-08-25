@@ -37,7 +37,7 @@ class Optimizer(object):
         self.params = [p for p in params if p.requires_grad]
         if self.method == 'sgd':
             if self.verbose:
-                print 'SGD, lr: %.2f' % self.lr
+                print('SGD, lr: %.2f' % self.lr)
             self.optimizer = optim.SGD(self.params, lr=self.lr)
         elif self.method == 'adagrad':
             self.optimizer = optim.Adagrad(self.params, lr=self.lr)
@@ -49,7 +49,7 @@ class Optimizer(object):
             self.optimizer = optim.Adadelta(self.params, lr=self.lr)
         elif self.method == 'adam':
             if self.verbose:
-                print 'Adam, lr: %.2f' % self.lr
+                print('Adam, lr: %.2f' % self.lr)
             self.optimizer = optim.Adam(self.params, lr=self.lr,
                                         betas=self.betas, eps=1e-9)
         else:

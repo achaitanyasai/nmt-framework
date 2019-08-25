@@ -39,7 +39,7 @@ from torch import optim
 from torch.autograd import Variable
 from torch.nn.utils import clip_grad_norm
 
-import data_iterator_optimized as data_iterator
+import data_iterator
 import util
 from models import seq2seq_attn, seq2seq_attn_char_cnn
 from modules import Loss, Optimizer, Trainer, Beam, Translator
@@ -260,7 +260,7 @@ def get_model(args, source_data, target_data):
         p.data.uniform_(-0.1, 0.1)
     
     with open('/home/chaitanya/Research/ShataAnuvadak/_pytorch/all_indian_languages/data/monolingual/hindi/emb1.txt') as f:
-        print 'Reading emb1.txt'
+        print('Reading emb1.txt')
         o = 0
         for j, line in enumerate(f.readlines()):
             if j == 0:
@@ -275,7 +275,7 @@ def get_model(args, source_data, target_data):
                 idx = source_data.word2idx[word]
                 model.encoder.emb1.weight.data[idx] = torch.tensor(wv).cuda()
     with open('/home/chaitanya/Research/ShataAnuvadak/_pytorch/all_indian_languages/data/monolingual/hindi/emb2.txt') as f:
-        print 'Reading emb2.txt'
+        print('Reading emb2.txt')
         o1 = 0
         for j, line in enumerate(f.readlines()):
             if j == 0:
@@ -290,7 +290,7 @@ def get_model(args, source_data, target_data):
                     continue
                 model.encoder.emb2.weight.data[idx] = torch.tensor(wv).cuda()
     with open('/home/chaitanya/Research/ShataAnuvadak/_pytorch/all_indian_languages/data/monolingual/hindi/emb3.txt') as f:
-        print 'Reading emb3.txt'
+        print('Reading emb3.txt')
         o2 = 0
         for j, line in enumerate(f.readlines()):
             if j == 0:
@@ -419,7 +419,7 @@ def train_model(args, model, train_criterion, valid_criterion, optimizer,
     logger.info('Training')
     start_time = time.time()
 
-    for epoch in xrange(1, args.max_epochs + 1):
+    for epoch in range(1, args.max_epochs + 1):
         # Train the model on training set
         train_data_iterator.reset()
         train_stats = trainer.train(args, train_data_iterator, source_data, target_data, epoch)

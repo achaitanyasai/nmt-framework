@@ -2,6 +2,8 @@ import random
 
 import torch
 import numpy as np
+from .. import base_config as config
+
 import math
 
 torch.backends.cudnn.deterministic = True

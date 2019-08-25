@@ -19,7 +19,7 @@ from torch import optim
 from torch.autograd import Variable
 from torch.nn.utils import clip_grad_norm
 
-import data_iterator_optimized as data_iterator
+import data_iterator
 import util
 import subprocess
 import logging.config
@@ -41,17 +41,3 @@ torch.cuda.manual_seed(3435)
 
 logger = logging.getLogger('simple_example')
 logger.setLevel(logging.DEBUG)
-
-src_lang = data_iterator.Lang('/tmp/in.src', 10, max_word_len_allowed=20, max_vocab_size=10000, langtype='source', chars = False, verbose=False, ignore_too_many_unknowns=True)
-tgt_lang = data_iterator.Lang('/tmp/in.tgt', 10, max_word_len_allowed=20, max_vocab_size=10000, langtype='target', chars = False, verbose=False, ignore_too_many_unknowns=True)
-        
-iterator = data_iterator.dataIterator(src_lang, tgt_lang, shuffle = True)
-N = 10
-i = 0
-while i < N:
-    # print iterator.next_batch(batch_size=1)
-    try:
-        print iterator.next()
-        i += 1
-    except Exception:
-        pass

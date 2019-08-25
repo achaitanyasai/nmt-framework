@@ -6,11 +6,13 @@ check_and_exit () {
     fi
 }
 
-unittests="no"
-clean="yes"
-train="yes"
-test="yes"
-bleu="yes"
+mkdir -p data
+
+unittests="yes"
+clean="no"
+train="no"
+test="no"
+bleu="no"
 
 dataDir="./dataset/"
 src="hn"
