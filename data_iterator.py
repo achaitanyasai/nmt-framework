@@ -347,8 +347,8 @@ class DataIterator(object):
             src_raw.append(src_lines_unsorted[i])
             src_lens.append(src_lens_unsorted[i])
 
-        src_lines = torch.LongTensor(src_lines)
-        src_lens = torch.LongTensor(src_lens)
+        src_lines = torch.LongTensor(src_lines).cuda()
+        src_lens = torch.LongTensor(src_lens).cuda()
         if len(tgt_lens_unsorted) > 0:
             for i in indices:
                 y = self.targetField.sentence2indices(tgt_lines_unsorted[i], max_len=tgt_max_len)
@@ -356,10 +356,8 @@ class DataIterator(object):
                 tgt_raw.append(tgt_lines_unsorted[i])
                 tgt_lens.append(tgt_lens_unsorted[i])
 
-        tgt_lines = torch.LongTensor(tgt_lines).cuda()
-        tgt_lens = torch.LongTensor(tgt_lens).cuda()
-
-        source_lines = []
+            tgt_lines = torch.LongTensor(tgt_lines).cuda()
+            tgt_lens = torch.LongTensor(tgt_lens).cuda()
 
         batch = BatchData(src_lines, tgt_lines, src_lens, tgt_lens,
                           sentences_indices, src_raw, tgt_raw, n_samples)

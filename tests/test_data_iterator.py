@@ -7,6 +7,7 @@ tests for data_iterator.py
 
 import random
 random.seed(8595)
+import torch
 import unittest
 import data_iterator
 
@@ -201,10 +202,53 @@ class testDataIterator(unittest.TestCase):
                                               src_max_len=100, tgt_max_len=100, src_max_vocab_size=100,
                                               tgt_max_vocab_size=100, ignore_too_many_unknowns=True)
         a = train_iterator.next_batch(1)
+        self.assertTrue(torch.eq(a.src, torch.tensor([[5]]).cuda()))
+        self.assertEqual(a.src_raw, [['22']])
+        self.assertTrue(torch.eq(a.tgt, torch.tensor([[7]]).cuda()))
+        self.assertEqual(a.tgt_raw, [['17']])
+        # =========================================
         a = train_iterator.next_batch(1)
+        self.assertTrue(torch.all(torch.eq(a.src, torch.tensor([[2, 3]]).cuda())))
+        self.assertEqual(a.src_raw, [['hello', 'world']])
+        self.assertTrue(torch.all(torch.eq(a.tgt, torch.tensor([[4, 5]]).cuda())))
+        self.assertEqual(a.tgt_raw, [['hello', 'world']])
+        # =========================================
         a = train_iterator.next_batch(1)
-        print(a.src)
-        print(a.tgt)
+        self.assertTrue(torch.all(torch.eq(a.src, torch.tensor([[4]]).cuda())))
+        self.assertEqual(a.src_raw, [['okrst']])
+        self.assertTrue(torch.all(torch.eq(a.tgt, torch.tensor([[6]]).cuda())))
+        self.assertEqual(a.tgt_raw, [['okrst']])
+        # =========================================
+        a = train_iterator.next_batch(1)
+        self.assertTrue(torch.all(torch.eq(a.src, torch.tensor([[6, 5]]).cuda())))
+        self.assertEqual(a.src_raw, [['asdf', '22']])
+        self.assertTrue(torch.all(torch.eq(a.tgt, torch.tensor([[7, 8]]).cuda())))
+        self.assertEqual(a.tgt_raw, [['17', 'qwe']])
+        # =========================================
+        a = train_iterator.next_batch(1)
+        self.assertEqual(a, None)
+        # =========================================
+
+    def test_next_batch_pruned(self):
+        train_iterator = data_iterator.DataIterator(fields=None, fname='./tests/toy_very_small/data.csv', shuffle=True,
+                                              data_type='train',
+                                              src_max_len=1, tgt_max_len=1, src_max_vocab_size=100,
+                                              tgt_max_vocab_size=100, ignore_too_many_unknowns=True)
+        a = train_iterator.next_batch(1)
+        self.assertTrue(torch.eq(a.src, torch.tensor([[3]]).cuda()))
+        self.assertEqual(a.src_raw, [['22']])
+        self.assertTrue(torch.eq(a.tgt, torch.tensor([[5]]).cuda()))
+        self.assertEqual(a.tgt_raw, [['17']])
+        # =========================================
+        a = train_iterator.next_batch(1)
+        self.assertTrue(torch.all(torch.eq(a.src, torch.tensor([[2]]).cuda())))
+        self.assertEqual(a.src_raw, [['okrst']])
+        self.assertTrue(torch.all(torch.eq(a.tgt, torch.tensor([[4]]).cuda())))
+        self.assertEqual(a.tgt_raw, [['okrst']])
+        # =========================================
+        a = train_iterator.next_batch(1)
+        self.assertEqual(a, None)
+        # =========================================
 
 if __name__ == '__main__':
    unittest.main()
