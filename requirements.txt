@@ -3,3 +3,4 @@ netifaces
 numpy
 setuptools
 six
+torch

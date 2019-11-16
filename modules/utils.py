@@ -19,7 +19,7 @@ class Statistics(object):
         self.start_time = time.time()
     
     def update(self, stat):
-        self.loss += stat.loss
+        self.loss = torch.sum(torch.tensor([self.loss, stat.loss]))
         self.n_words += stat.n_words
         self.n_correct += stat.n_correct
         self.n_sentences += stat.n_sentences
@@ -27,7 +27,7 @@ class Statistics(object):
     def _loss(self):
         if self.n_words == 0:
             return 0
-        return self.loss / float(self.n_words)
+        return self.loss.item() / float(self.n_words)
 
     def accuracy(self):
         if self.n_words == 0:
@@ -50,7 +50,10 @@ class Statistics(object):
         log = log % (epoch, batch, self._loss(), self.perplexity(), self.accuracy(), self.speed(t), t)
         if batch == -1:
             log += '\n'
-        logger.info(log)
+        # logger.info(log)
+
+    def _print(self, v):
+        print('%d, nSents: %d, nWords: %d, nCorrect: %d, accuracy: %.12f, loss: %.12f, normalized loss: %.12f' % (v, self.n_sentences, self.n_words, self.n_correct, self.accuracy(), self.loss, self._loss()))
 
 def calculate_correct_predictions(predictions, gtruth, target_padding_idx):
     pred = predictions.max(1)[1]

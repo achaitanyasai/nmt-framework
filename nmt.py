@@ -4,24 +4,8 @@
 '''
 Neural Machine Translation base module
 '''
-# Start from line 308 and then follow DFS
-# manner to understand the code structure.
-# Import comet_ml in the top of your file
+
 from comet_ml import Experiment
-
-# Create an experiment
-experiment = Experiment(api_key="G1Hu2kJ89qGE5sZ1cBNlrq6Hj",
-                        project_name="general", workspace="achaitanyasai",
-                        disabled=True)
-
-experiment.log_asset(file_path='./models/seq2seq_attn.py', file_like_object=None, file_name='seq2seq_attn.py', overwrite=False)
-experiment.log_asset(file_path='./modules/Trainer.py', file_like_object=None, file_name='trainer.py', overwrite=False)
-experiment.log_asset(file_path='./data_iterator.py', file_like_object=None, file_name='data_iterator.py', overwrite=False)
-experiment.add_tag('Expt-8')
-experiment.add_tag('vector_space=2')
-experiment.add_tag('UNK percentage=5')
-# experiment.add_tag('Baseline')
-
 import argparse
 import logging
 import math
@@ -39,16 +23,17 @@ from torch import optim
 from torch.autograd import Variable
 from torch.nn.utils import clip_grad_norm
 
+from data_iterator import *
 import data_iterator
 import util
-from models import seq2seq_attn, seq2seq_attn_char_cnn
+from models import seq2seq_attn, seq2seq_attn_baseline, seq2seq_attn_multivec
 from modules import Loss, Optimizer, Trainer, Beam, Translator
 import subprocess
 import logging.config
 import warnings
 import datetime
-
-use_cuda = torch.cuda.is_available()
+# from structs import *
+import neptune
 
 #The below line is for reproducibility of results, refer:
 # https://github.com/pytorch/pytorch/issues/114 
@@ -61,297 +46,255 @@ torch.manual_seed(3435)
 torch.cuda.manual_seed_all(3435)
 torch.cuda.manual_seed(3435)
 
-logger = logging.getLogger('simple_example')
-logger.setLevel(logging.DEBUG)
-
 def parse_arguments():
-    '''
-    Parsing arguments
-    '''
-    logger.info('Parsing arguments')
+    logger.info("Parsing arguments")
     parser = argparse.ArgumentParser()
-    data = parser.add_argument_group('data sets; model loading and saving')
-    data.add_argument('--datasets', type=str, required=True, metavar='PATH', nargs=1,
-                        help="parallel training corpus (source and target)")
-    data.add_argument('--datasets_valid', type=str, required=True, metavar='PATH', nargs=1,
-                        help="parallel validation corpus (source and target)")
-    data.add_argument('--language_objects', type=str, metavar='PATH', nargs=2, 
-                        default = ['./data/language_object.train.src.pkl', './data/language_object.train.trg.pkl'],
-                        help="paths to pickle files for data_iterator.Lang objects (source and target).")
-    data.add_argument('--language_objects_valid', type=str, metavar='PATH', nargs=2, 
-                        default = ['./data/language_object.valid.src.pkl', './data/language_object.valid.trg.pkl'],
-                        help="paths to pickle files for data_iterator.Lang objects (source and target).")
-    data.add_argument('--saveTo', type=str, default='./data/model.pt', metavar='PATH', required=True,
-                        help="location of model to save (default: %(default)s)")
-    data.add_argument('--saveFreq', type=int, default=30000, metavar='INT',
-                        help="save frequency (default: %(default)s)")
-    data.add_argument('--overwrite', action='store_true',
-                        help="write all models to same file")
-    data.add_argument('--char', action='store_true',
-                        help="use character cnn on words of encoder")
-    
-    network = parser.add_argument_group('network parameters')
-    network.add_argument('--dim_word_src', type=int, default=500, metavar='INT',
-                        help="source embedding layer size (default: %(default)s)")
-    network.add_argument('--dim_word_trg', type=int, default=500, metavar='INT',
-                        help="target embedding layer size (default: %(default)s)")
-    network.add_argument('--dim', type=int, default=500, metavar='INT',
-                        help="hidden layer size (default: %(default)s)")
-    network.add_argument('--bidirectional', action="store_true",
-                        help="bidirectional encoder (default: %(default)s)")
-    network.add_argument('--enc_depth', type=int, default=1, metavar='INT',
-                        help="number of encoder layers (default: %(default)s)")
-    network.add_argument('--dec_depth', type=int, default=1, metavar='INT',
-                        help="number of decoder layers (default: %(default)s)") #TODO: decoder with layers more than one(not sure how it works)
-    network.add_argument('--dropout', type=float, default=0.2, metavar="FLOAT",
-                        help="dropout (0: no dropout) (default: %(default)s)") #TODO: Seperate dropout for enc, dec, layers
-    network.add_argument('--encoder', type=str, default='gru', choices=['gru', 'lstm'],
-                        help='encoder recurrent layer (default: %(default)s)')
-    network.add_argument('--decoder', type=str, default='gru', choices=['gru', 'lstm'],
-                        help='first decoder recurrent layer (default: %(default)s)')
-    
-    training = parser.add_argument_group('training parameters')
-    training.add_argument('--src_maxlen', type=int, default=50, metavar='INT',
-                        help="maximum source sequence length (default: %(default)s)")
-    training.add_argument('--tgt_maxlen', type=int, default=50, metavar='INT',
-                        help="maximum target sequence length (default: %(default)s)")
 
-    training.add_argument('--src_max_word_len', type=int, required=True, metavar='INT',
-                        help="maximum source word length")
-    training.add_argument('--tgt_max_word_len', type=int, required=True, metavar='INT',
-                        help="maximum source word length")
-    training.add_argument('--src_max_vocab_size', type=int, required=True, metavar='INT',
-                        help="maximum source vocab size")
-    training.add_argument('--tgt_max_vocab_size', type=int, required=True, metavar='INT',
-                        help="maximum target vocab size")
+    data = parser.add_argument_group("Data sets; model loading and saving; Hyper parameters related to data")
+    data.add_argument("--train_dataset", type=str, required=True, metavar='PATH', help='Path to training corpus in csv file')
+    data.add_argument("--valid_dataset", type=str, required=True, metavar='PATH', help='Path to validation corpus in csv file')
+    data.add_argument("--test_dataset", type=str, required=True, metavar='PATH', help='Path to test corpus in csv file')
+    data.add_argument('--save_to', type=str, required=True, metavar='PATH', help='Location of model to save')
+    data.add_argument('--save_freq', type=int, required=True, metavar='INT', help='Saving frequency (epochs or steps)')
+    data.add_argument('--source_max_len', type=int, required=True, metavar='INT', help='Maximum length of the source sentence. Only applied to training set')
+    data.add_argument('--target_max_len', type=int, required=True, metavar='INT', help='Maximum length of the target sentence. Only applied to training set')
+    data.add_argument('--source_max_vocab_size', type=int, required=True, metavar='INT', help='Maximum vocabulary size of source language. Only applied to training set')
+    data.add_argument('--target_max_vocab_size', type=int, required=True, metavar='INT', help='Maximum vocabulary size of target language. Only applied to training set')
+    data.add_argument('--ignore_too_many_unknowns', action='store_true', help='Ignore too many unknowns. Only applies to training set')
+    data.add_argument('--path_to_logs', type=str, required=True, metavar='PATH', help='PATH to logs')
 
-    training.add_argument('--optimizer', type=str, default="sgd", 
-                        choices=['adam', 'adadelta', 'rmsprop', 'sgd', 'sgdmomentum'],
-                        help="optimizer (default: %(default)s)")
-    training.add_argument('--lrate', type=float, default=1.0, metavar='FLOAT',
-                        help="learning rate (default: %(default)s)")
-    training.add_argument('--max_grad_norm', type=float, default=5, metavar='FLOAT',
-                        help="TODO (default: %(default)s)")
-    training.add_argument('--lrate_decay', type=float, default=0.5, metavar='FLOAT',
-                        help="TODO (default: %(default)s)")
-    training.add_argument('--start_decay_at', type=float, default=16, metavar='FLOAT',
-                        help="TODO (default: %(default)s)")
-    training.add_argument('--adam_beta1', type=float, default=0.9, metavar='FLOAT',
-                        help="TODO (default: %(default)s)")
-    training.add_argument('--adam_beta2', type=float, default=0.999, metavar='FLOAT',
-                        help="TODO (default: %(default)s)")
-    training.add_argument('--adagrad_accumulator_init', type=float, default=0, metavar='FLOAT',
-                        help="TODO (default: %(default)s)")
-    training.add_argument('--decay_method', type=str, default="", 
-                        choices=['noam'], help="lr decay method (default: %(default)s)")
-    training.add_argument('-warmup_steps', type=int, default=4000,
-                       help="""Number of warmup steps for custom decay.""")
-    training.add_argument('--batch_size', type=int, default=64, metavar='INT',
-                        help="minibatch size (default: %(default)s)")
-    training.add_argument('--max_epochs', type=int, default=20, metavar='INT',
-                        help="maximum number of epochs (default: %(default)s)")
-    training.add_argument('--max_number_of_sentences_allowed', type=int, default=1000000000000000, metavar='INT',
-                        help="maximum number of sentences (default: %(default)s)")
-    
-    training.add_argument('--norm_method', type=str, default="sent", 
-                        choices=['sent', 'word'], help="normalization method (default: %(default)s)")
-    training.add_argument('--no_shuffle', action="store_false", dest="shuffle_each_epoch",
-                        help="disable shuffling of training data (for each epoch)")
-    training.add_argument('--objective', choices=['CE', 'MRT', 'RAML'], default='CE', #TODO: MRT, RAML
-                        help='training objective. CE: cross-entropy minimization (default); MRT: Minimum Risk Training (https://www.aclweb.org/anthology/P/P16/P16-1159.pdf) \
-                        RAML: Reward Augmented Maximum Likelihood (https://papers.nips.cc/paper/6547-reward-augmented-maximum-likelihood-for-neural-structured-prediction.pdf)')
-    
-    validation = parser.add_argument_group('validation parameters')
-    validation.add_argument('--valid_datasets', type=str, default=None, metavar='PATH', nargs=2,
-                        help="parallel validation corpus (source and target) (default: %(default)s)")
-    validation.add_argument('--valid_batch_size', type=int, default=80, metavar='INT',
-                        help="validation minibatch size (default: %(default)s)")
-    validation.add_argument('--validFreq', type=int, default=10000, metavar='INT',
-                        help="validation frequency (default: %(default)s)")
-    validation.add_argument('--patience', type=int, default=10, metavar='INT',
-                        help="early stopping patience (default: %(default)s)")
-    
-    display = parser.add_argument_group('display parameters')
-    display.add_argument('--dispFreq', type=int, default=1, metavar='INT',
-                        help="display loss after INT updates (default: %(default)s)")
-    display.add_argument('--evaluateFreq', type=int, default=10, metavar='INT',
-                        help="evaluate model after INT epochs (default: %(default)s)")
-    display.add_argument('--sampleFreq', type=int, default=1000, metavar='INT',
-                        help="display some samples after INT updates (default: %(default)s)")
-    
+    network = parser.add_argument_group('Network hyper parameters')
+    network.add_argument('--bidirectional', type=int, required=True, metavar='INT', help='Bidirectional RNN encoder')
+    network.add_argument('--encoder_num_layers', type=int, required=True, metavar='INT', help='Number of layers in RNN Encoder')
+    network.add_argument('--encoder_hidden_dim', type=int, required=True, metavar='INT', help='Hidden dimension in RNN Encoder')
+    network.add_argument('--encoder_embedding_dim', type=int, required=True, metavar='INT', help='Embedding dimension for RNN Encoder')
+    network.add_argument('--encoder_dropout', type=float, required=True, metavar='FLOAT', help='Dropout between layers in RNN Encoder')
+
+    network.add_argument('--decoder_num_layers', type=int, required=True, metavar='INT', help='Number of layers in RNN Decoder')
+    network.add_argument('--decoder_hidden_dim', type=int, required=True, metavar='INT', help='Hidden dimension in RNN Decoder')
+    network.add_argument('--decoder_embedding_dim', type=int, required=True, metavar='INT', help='Embedding dimension for RNN Decoder')
+    network.add_argument('--decoder_dropout', type=float, required=True, metavar='FLOAT', help='Dropout between layers in RNN Decoder')
+    # TODO: Add more attention options: mlp, dot, etc. (Bahdanau, Luong)
+    network.add_argument('--decoder_attention_type', type=str, required=True, choices=['general'], help='Attention type between encoder outputs and decoder hidden state')
+
+    training = parser.add_argument_group('Training hyper parameters')
+    training.add_argument('--use_epochs', action='store_true', help='Use epochs instead of steps/updates')
+    training.add_argument('--gradient_checks', action='store_true', help='Check gradients for all the weights during each update during training')
+    training.add_argument('--steps', type=int, required=True, metavar='INT', help='Number of steps. If --use_epochs is used, then the value should be number of epochs')
+    training.add_argument('--batch_size', type=int, required=True, metavar='INT', help='Batch size')
+    training.add_argument('--norm_method', type=str, required=True, choices=['sents', 'tokens'], help='Normalization method')
+
+
+    opt = parser.add_argument_group('Optimizer hyper parameters')
+    opt.add_argument('--optimizer', type=str, required=True, choices=['sgd', 'adam'], help='Optimizer')
+    opt.add_argument('--lrate', type=float, required=True, metavar='FLOAT', help='Learning rate')
+    opt.add_argument('--max_grad_norm', type=float, required=True, metavar='FLOAT', help='Max Gradient Norm')
+    opt.add_argument('--start_decay_at', type=int, required=True, metavar='INT', help='Number of steps after which learning rate starts decaying')
+    opt.add_argument('--decay_lrate_steps', type=float, required=True, metavar='FLOAT', help='Number of steps between two learning rate decays')
+    opt.add_argument('--adam_beta1', type=float, required=True, metavar='FLOAT', help='Adam beta1')
+    opt.add_argument('--adam_beta2', type=float, required=True, metavar='FLOAT', help='Adam beta2')
+    opt.add_argument('--lrate_decay', type=float, required=True, metavar='FLOAT', help='learning rate decay factor')
+    opt.add_argument('--warmup_steps', type=float, required=True, metavar='FLOAT', help='warmup steps for adam optimizer') # TODO: Need to learn about warmup steps
+
     args = parser.parse_args()
+
+    args.bidirectional = args.bidirectional == 1
+
+    logger.error('Change store-true arguments to integers. arg-switch in guild.yml is not working')
+    # TODO: Verify arguments.
 
     return args
 
-def get_Lang_object(dataset_paths, pkl_file_paths, data_type):
-    '''
-    Loading/creating the data_iterator.Lang objects.
-    If newly creating, the pickle files will be saved in ./data/ folder.
-    '''
-    if os.path.isfile(pkl_file_paths[0]) and os.path.isfile(pkl_file_paths[1]):
-        '''
-        Loading data_iterator.Lang objects for source and target languages.
-        '''
-        logger.info('Lang objects found, loading')
-        source_data = util.read_pickle(pkl_file_paths[0])
-        target_data = util.read_pickle(pkl_file_paths[1])
-    else:
-        '''
-        Creating data_iterator.Lang objects for source and target languages.
-        '''
-        logger.info('Lang objects not found, creating')
-        source_data = data_iterator.Lang(dataset_paths[0], args.src_maxlen, args.src_max_word_len, args.src_max_vocab_size, langtype='source', chars=False, verbose=True, data_type=data_type, ignore_too_many_unknowns = False, max_number_of_sentences_allowed=args.max_number_of_sentences_allowed)
-        target_data = data_iterator.Lang(dataset_paths[1], args.tgt_maxlen, args.tgt_max_word_len, args.tgt_max_vocab_size, langtype='target', chars=False, verbose=True, data_type=data_type, ignore_too_many_unknowns = False, max_number_of_sentences_allowed=args.max_number_of_sentences_allowed)
-        logger.info('Saving source lang at %s' % (pkl_file_paths[0]))
-        util.write_pickle(source_data, pkl_file_paths[0], pickle.HIGHEST_PROTOCOL)
-        logger.info('Saving target lang at %s' % (pkl_file_paths[1]))
-        util.write_pickle(target_data, pkl_file_paths[1], pickle.HIGHEST_PROTOCOL)
-    return source_data, target_data
+def getIterators(args):
+    logger.info("Loading train iterator")
+    train_iterator = data_iterator.DataIterator(fields=None, fname=args.train_dataset, shuffle=True,
+                                                data_type='train', src_max_len=args.source_max_len, tgt_max_len=args.target_max_len,
+                                                src_max_vocab_size=args.source_max_vocab_size, tgt_max_vocab_size=args.target_max_vocab_size,
+                                                ignore_too_many_unknowns=args.ignore_too_many_unknowns,
+                                                break_on_stop_iteration=args.use_epochs)
 
-def get_data(args):
-    '''
-    load data_iterator.Lang and build data_iterator.dataIterator objects
-    '''
-    source_data, target_data = get_Lang_object(args.datasets[0].split(), args.language_objects, 'train')
-    source_data_valid, target_data_valid = get_Lang_object(args.datasets_valid[0].split(), args.language_objects_valid, 'valid')
-    
-    data_iter = data_iterator.dataIterator(source_data, target_data, shuffle=True)
-    data_iter_valid = data_iterator.dataIterator(source_data_valid, target_data_valid, shuffle = False)
-    
-    return source_data, target_data, source_data_valid, target_data_valid, data_iter, data_iter_valid
-    
+    logger.info("Loading valid iterator")
+    valid_iterator = data_iterator.DataIterator(fields=(train_iterator.sourceField, train_iterator.targetField),
+                                                fname=args.valid_dataset, shuffle=False,
+                                                data_type='valid')
 
-def get_model(args, source_data, target_data):
-    '''
-    Build model
-    '''
-    #TODO: Make this user friendly.
-    logger.info('Building encoder')    
-    encoder = seq2seq_attn.CustomEncoder(
-        'LSTM',
-        bidirectional = True,
-        num_layers = args.enc_depth, 
-        hidden_size = 500,
-        vocab_size = source_data.n_words,
-        embedding_dim = 500,
-        pad_token = source_data.word2idx['PAD'], 
-        ngrams_vocab_size = source_data.n_hashes,
-        dropout = 0.4,
-        ngram_pad_token = 0).cuda()
+    logger.info("Loading test iterator")
+    test_iterator = data_iterator.DataIterator(fields=(train_iterator.sourceField, train_iterator.targetField),
+                                                fname=args.test_dataset, shuffle=False,
+                                                data_type='test')
+    return TrainValidTestIterator(train_iterator, valid_iterator, test_iterator)
 
-    logger.info('Building decoder')    
-    decoder = seq2seq_attn.decoder(
-        'LSTM', 
-        bidirectional_encoder = True,
-        num_layers = args.dec_depth,
-        hidden_size = 500,
-        vocab_size = target_data.n_words,
-        ngrams_vocab_size = target_data.n_hashes,
-        embedding_dim = 500,
-        pad_token = target_data.word2idx['PAD'],
-        attn_type = 'general',
-        dropout = 0.4,
-        ngram_pad_token = 0).cuda()
-    
-    model = seq2seq_attn.Seq2SeqAttention(encoder, decoder).cuda()
-    logger.info('Initializing model parameters')
-    #Refer: https://discuss.pytorch.org/t/initializing-embeddings-for-nmt-matters-a-lot/10517
+def initialize_model_parameters(model, source_word2idx):
     for p in model.parameters():
         p.data.uniform_(-0.1, 0.1)
-    
-    with open('/home/chaitanya/Research/ShataAnuvadak/_pytorch/all_indian_languages/data/monolingual/hindi/emb1.txt') as f:
-        print('Reading emb1.txt')
-        o = 0
-        for j, line in enumerate(f.readlines()):
-            if j == 0:
-                continue
-            cur = line.strip().split(' ')
-            word = cur[0]
-            wv = map(float, cur[1::])
-            if word in source_data.word2idx:
-                o += 1
-                if 0 == wv[0] and 0 == wv[1] and 0 == wv[2] and 0 == wv[3]:
+    path = '/home/chaitanya/Research/ShataAnuvadak/_pytorch/all_indian_languages/data/monolingual/hindi'
+    for emb_idx in range(1, 4):
+        logger.info('Reading %s/emb%d.txt' % (path, emb_idx))
+        with open('%s/emb%d.txt' % (path, emb_idx)) as f:
+            o = 0
+            for j, line in enumerate(f.readlines()):
+                if j == 0:
                     continue
-                idx = source_data.word2idx[word]
-                model.encoder.emb1.weight.data[idx] = torch.tensor(wv).cuda()
-    with open('/home/chaitanya/Research/ShataAnuvadak/_pytorch/all_indian_languages/data/monolingual/hindi/emb2.txt') as f:
-        print('Reading emb2.txt')
-        o1 = 0
-        for j, line in enumerate(f.readlines()):
-            if j == 0:
-                continue
-            cur = line.strip().split(' ')
-            word = cur[0]
-            wv = map(float, cur[1::])
-            if word in source_data.word2idx:
-                o1 += 1
-                idx = source_data.word2idx[word]
-                if 0 == wv[0] and 0 == wv[1] and 0 == wv[2] and 0 == wv[3]:
-                    continue
-                model.encoder.emb2.weight.data[idx] = torch.tensor(wv).cuda()
-    with open('/home/chaitanya/Research/ShataAnuvadak/_pytorch/all_indian_languages/data/monolingual/hindi/emb3.txt') as f:
-        print('Reading emb3.txt')
-        o2 = 0
-        for j, line in enumerate(f.readlines()):
-            if j == 0:
-                continue
-            cur = line.strip().split(' ')
-            word = cur[0]
-            wv = map(float, cur[1::])
-            if word in source_data.word2idx:
-                o2 += 1
-                if 0 == wv[0] and 0 == wv[1] and 0 == wv[2] and 0 == wv[3]:
-                    continue
-                idx = source_data.word2idx[word]
-                model.encoder.emb3.weight.data[idx] = torch.tensor(wv).cuda()
-    
-    print(o)
-    print(o1)
-    print(o2)
-    logger.info(model)
-    return None, None, model
+                cur = line.strip().split(' ')
+                word = cur[0].lower()
+                wv = list(map(float, cur[1::]))
+                if word in source_word2idx:
+                    o += 1
+                    if 0 == wv[0] and 0 == wv[1] and 0 == wv[2] and 0 == wv[3]:
+                        continue
+                    idx = source_word2idx[word]
+                    if emb_idx == 1:
+                        model.encoder.embeddings1.weight.data[idx] = torch.tensor(wv).cuda()
+                    elif emb_idx == 2:
+                        model.encoder.embeddings2.weight.data[idx] = torch.tensor(wv).cuda()
+                    elif emb_idx == 3:
+                        model.encoder.embeddings3.weight.data[idx] = torch.tensor(wv).cuda()
+                    else:
+                        assert False
+            logger.info('Number of words found in monolingual corpus for emb%d: %d out of %d' % (emb_idx, o, len(source_word2idx)))
 
-def load_model():
-    model = torch.load('./data/model.pt')
-    model.eval()
-    logger.info(model)
-    return None, None, model
+        # Uncomment below lines to freeze embeddings. It's discouraged to freeze though.
+        # logger.warn('Freezing embeddings')
+        # model.encoder.embeddings1.weight.requires_grad = False
+        # model.encoder.embeddings2.weight.requires_grad = False
+        # model.encoder.embeddings3.weight.requires_grad = False
 
-def get_optimizer(args, model, verbose=True):
-    '''
-    Build optimizer
-    '''
+
+def buildModel(args, train_iterator):
+    logger.info('Building Encoder')
+    encoder = seq2seq_attn_multivec.encoder(
+        'LSTM',
+        bidirectional=args.bidirectional,
+        num_layers=args.encoder_num_layers,
+        hidden_size=args.encoder_hidden_dim,
+        vocab_size=train_iterator.sourceField.nWords,
+        embedding_dim=args.encoder_embedding_dim,
+        pad_token=train_iterator.sourceField.word2idx['PAD'],
+        dropout=args.encoder_dropout
+    ).cuda()
+
+    logger.info('Building Decoder')
+    decoder = seq2seq_attn_multivec.decoder(
+        'LSTM',
+        bidirectional_encoder=args.bidirectional,
+        num_layers=args.decoder_num_layers,
+        hidden_size=args.decoder_hidden_dim,
+        vocab_size=train_iterator.targetField.nWords,
+        embedding_dim=args.decoder_embedding_dim,
+        pad_token=train_iterator.targetField.word2idx['PAD'],
+        attn_type=args.decoder_attention_type,
+        dropout=args.decoder_dropout
+    ).cuda()
+
+    logger.info('Building Model')
+    model = seq2seq_attn_multivec.Seq2SeqAttention(encoder, decoder).cuda()
+
+    logger.info('Initializing Model Parameters')
+    initialize_model_parameters(model, train_iterator.sourceField.word2idx)
+    logger.info(model)
+    return model
+
+def loadModel(args):
+    logger.info('Loading model')
+    pass
+
+def getOptimizer(args):
+    logger.info('Building optimizer')
     optimizer = Optimizer.Optimizer(
         args.optimizer,
         args.lrate,
         args.max_grad_norm,
         args.lrate_decay,
         args.start_decay_at,
+        args.decay_lrate_steps,
         args.adam_beta1,
-        args.adam_beta2,
-        args.adagrad_accumulator_init,
-        args.decay_method,
-        args.warmup_steps,
-        args.dim,
-        verbose
+        args.adam_beta2
     )
-    optimizer.set_parameters(model.parameters())
+
+    optimizer.set_parameters(args.model.parameters())
     return optimizer
 
-def get_criterion(args, target_data):
-    '''
-    Build error criterion.
-    Only supports NLLLoss()
-    '''
-    criterion = Loss.NMTLoss(target_data.word2idx, target_data.word2idx['PAD'])
-    return criterion.cuda()
+def getCriterions(args):
+    train_criterion = Loss.NMTLoss(target_vocabulary_len=args.iterators.train_iterator.targetField.nWords, target_padding_idx=1,
+                              reduction='sum', perform_dimension_checks=True).cuda()
+    valid_criterion = Loss.NMTLoss(target_vocabulary_len=args.iterators.train_iterator.targetField.nWords, target_padding_idx=1,
+                              reduction='sum', perform_dimension_checks=True).cuda()
+    return Criterions(train_criterion, valid_criterion)
 
-def predict_and_get_bleu_score(args, model, source_data, target_data, source_data_valid, 
-                               target_data_valid, train_data_iterator, valid_data_iterator):
-    
-    scorer = Beam.GNMTGlobalScorer(0.0, -0.0)
-    
-    translator = Translator.Translator(model, source_data, target_data, valid_data_iterator,
+def test(args):
+    pass
+
+intervals = (
+    ('w', 604800),  # 60 * 60 * 24 * 7
+    ('d', 86400),    # 60 * 60 * 24
+    ('h', 3600),    # 60 * 60
+    ('m', 60),
+    ('s', 1),
+    )
+
+def display_time(seconds, granularity=2):
+    result = []
+
+    for name, count in intervals:
+        value = seconds // count
+        if value:
+            seconds -= value * count
+            if value == 1:
+                name = name.rstrip('s')
+            result.append("{}{}".format(value, name))
+    return ', '.join(result[:granularity])
+
+def train(args):
+
+    trainer = Trainer.Trainer(args)
+    best_loss = 1e9
+    best_accuracy = -1
+    start_time = time.time()
+    for steps in range(args.steps):
+        batch = args.iterators.train_iterator.next_batch(args.batch_size)
+        batch.transpose()
+        stats = trainer.propagate(batch, steps)
+        trainer.lr_step(stats._loss(), steps)
+        end_time = time.time()
+        elapsed = end_time - start_time
+        remaining_time = ((args.steps * elapsed) / float(steps + 1)) - elapsed
+        if steps % 10 == 0:
+            logger.info('Step: %d, train_loss: %.6f, train_accuracy: %.6f, ETA: %s' % (steps, stats._loss(), stats.accuracy(), display_time(remaining_time, 5)))
+            # neptune.log_metric('Training Loss', stats._loss())
+            # neptune.log_metric('Training Accuracy', stats.accuracy())
+
+            experiment.log_metric('Training Loss', stats._loss(), step=steps)
+            experiment.log_metric('Training Accuracy', stats.accuracy(), step=steps)
+            torch.save(args.model.state_dict(), args.save_to)
+
+        if steps >= 250 and steps % 250 == 0:
+            args.iterators.valid_iterator.reset()
+            valid_stats = trainer.validate(args.iterators.valid_iterator, b_size=20)
+            logger.info('\n' + '=' * 20 + '\nStep: %d, valid_loss: %.6f, valid_accuracy: %.6f, LR: %.6f\n' % (
+            steps, valid_stats._loss(), valid_stats.accuracy(), args.optimizer.lrate) + '=' * 20)
+            cur_loss = valid_stats._loss()
+            cur_acc = valid_stats.accuracy()
+            # neptune.log_metric('Validation Loss', valid_stats._loss())
+            # neptune.log_metric('Validation Accuracy', valid_stats.accuracy())
+
+            experiment.log_metric('Validation Loss', valid_stats._loss(), step=steps)
+            experiment.log_metric('Validation Accuracy', valid_stats.accuracy(), step=steps)
+            if best_loss > cur_loss or best_accuracy < cur_acc:
+                logger.info('Saving model')
+                torch.save(args.model.state_dict(), args.save_to)
+            best_loss = min(best_loss, cur_loss)
+            best_accuracy = max(best_accuracy, cur_acc)
+
+def translate(args, iterators):
+    args.model.load_state_dict(torch.load('/home/chaitanya/PycharmProjects/venv/.guild/runs/55ea009d2bc84dc18706c99d8027a20e/data/model.pt'))
+    args.model.eval()
+
+    scorer = Beam.GNMTGlobalScorer(0.0, 0.0)
+
+    # Build translator
+
+    translator = Translator.Translator(args.model, iterators.train_iterator.sourceField,
+                                       iterators.train_iterator.targetField, iterators.test_iterator,
                                        beam_size=5,
                                        n_best=1,
                                        global_scorer=scorer,
@@ -360,8 +303,9 @@ def predict_and_get_bleu_score(args, model, source_data, target_data, source_dat
                                        cuda=True,
                                        beam_trace=False,
                                        min_length=0)
-    
-    builder = Translator.TranslationBuilder(source_data, target_data, valid_data_iterator,
+
+    builder = Translator.TranslationBuilder(iterators.train_iterator.sourceField, iterators.train_iterator.targetField,
+                                            iterators.test_iterator,
                                             1, True)
 
     pred_score_total, pred_words_total = 0, 0
@@ -369,12 +313,13 @@ def predict_and_get_bleu_score(args, model, source_data, target_data, source_dat
 
     f = open('./data/predicted.txt', 'w')
 
-    while cur_batch < valid_data_iterator.n_samples:
-        batch = valid_data_iterator.next_batch(10, 50, source_language_model = source_data, target_language_model = target_data)
+    while cur_batch < iterators.test_iterator.nSentences:
+        batch = iterators.test_iterator.next_batch(
+            1)  # , args.maxlen, source_language_model = source_data, target_language_model = target_data)
         batch_data = translator.translate_batch(batch)
-        
+
         translations = builder.from_batch(batch_data, batch)
-        
+
         for trans in translations:
             pred_score_total += trans.pred_scores[0]
             pred_words_total += len(trans.pred_sents[0])
@@ -383,105 +328,78 @@ def predict_and_get_bleu_score(args, model, source_data, target_data, source_dat
             f.write('\n')
             f.flush()
         cur_batch += batch.batch_size
-        sys.stdout.write('%d/%d       \r' % (cur_batch, valid_data_iterator.n_samples))
+        sys.stdout.write('%d/%d       \r' % (cur_batch, iterators.test_iterator.nSentences))
         sys.stdout.flush()
 
     f.close()
-    cmd = './scripts/bleu-1.04.pl %s < ./data/predicted.txt' % (args.datasets_valid[0].split()[1])
-    p = subprocess.Popen(cmd, bufsize = 4096, shell = True, stdout = subprocess.PIPE, stderr = subprocess.PIPE)
-    out, error = p.communicate()
-    return float(out.split(',')[0].replace('BLEU = ', ''))
-
-def train_model(args, model, train_criterion, valid_criterion, optimizer,
-                source_data, target_data, source_data_valid, target_data_valid, 
-                train_data_iterator, valid_data_iterator):
-    
-    
-    #normalization method: whether to normalize the loss per sentences or per words.
-    norm_method = args.norm_method
-
-    #Instantiate the trainer module. 
-    prev = 100000000000000000000
-    best_bleu_sofar = 0
-    trainer = Trainer.Trainer(model, train_criterion, valid_criterion, optimizer, norm_method=norm_method)
-    
-    instances = [
-        (trainer, ''), (trainer.optimizer, ''), (trainer.train_loss, 'Train loss'),
-        (trainer.valid_loss, 'Valid loss'), (source_data, 'Source training data'),
-        (target_data, 'Target training data'), (train_data_iterator, 'Training iterator'),
-        (source_data_valid, 'Source validation data'), (target_data_valid, 'Target validation data'),
-        (valid_data_iterator, 'Validation iterator'), (model.encoder, 'Model encoder'),
-        (model.decoder, 'Model decoder')
-    ]
-    logger.info('Writing training metadata to ./data/training_metadata.txt')
-    util.print_attributes(instances, model)
-
-    logger.info('Training')
-    start_time = time.time()
-
-    for epoch in range(1, args.max_epochs + 1):
-        # Train the model on training set
-        train_data_iterator.reset()
-        train_stats = trainer.train(args, train_data_iterator, source_data, target_data, epoch)
-        msg = ('=' * 80) + '\nEpoch: %d, Train Loss: %.3f, Train Accuracy: %.3f, Train Perplexity: %.3f'
-        msg = msg % (epoch, train_stats._loss(), train_stats.accuracy(), train_stats.perplexity())
-        logger.info(msg)
-        experiment.log_metric("train loss", train_stats._loss(), step=epoch)
-        experiment.log_metric("train accuracy", train_stats.accuracy(), step=epoch)
-
-        # Validate the model on validation set
-        valid_data_iterator.reset()
-        valid_stats = trainer.validate(args, valid_data_iterator, source_data, target_data)
-        msg = 'Epoch: %d, Valid Loss: %.3f, Valid Accuracy: %.3f, Valid Perplexity: %.3f'
-        msg = msg % (epoch,valid_stats._loss(),valid_stats.accuracy(),valid_stats.perplexity())
-        experiment.log_metric("valid loss", valid_stats._loss(), step=epoch)
-        experiment.log_metric("valid accuracy", valid_stats.accuracy(), step=epoch)
-        
-        logger.info(msg)
-        valid_data_iterator.reset()
-        model.eval()
-        bleu_score = predict_and_get_bleu_score(args, model, source_data, target_data, source_data_valid, 
-                                   target_data_valid, train_data_iterator, valid_data_iterator)
-        
-        msg = 'Epoch: %d, Valid BLEU Score: %.4f, Best BLEU Score: %.4f'
-        msg = msg % (epoch, bleu_score, max(bleu_score, best_bleu_sofar))
-        experiment.log_metric("valid bleu score", bleu_score, step=epoch)
-        logger.info(msg)
-
-        if(bleu_score > best_bleu_sofar):
-            logger.info('Saving model')            
-            torch.save(model, args.saveTo)
-        torch.save(model, './data/model_epoch_%d_valid_ppl_%.4f_bleu_%.4f_.pt' % (epoch, valid_stats.perplexity(), bleu_score))
-        best_bleu_sofar = max(best_bleu_sofar, bleu_score)
-        trainer.epoch_step(-bleu_score, epoch) #Just a work around to replace bleuscore inplace of ppl.
-        model.train()
-        elapsed = time.time() - start_time
-        forcast = int(((args.max_epochs - epoch) * elapsed) / epoch)
-        m, s = divmod(forcast, 60)
-        h, m = divmod(m, 60)
-        msg = '\nETA  : %d hours, %d mins\n' + ('=' * 80)
-        msg = msg % (h, m)
-        logger.info(msg)
 
 if __name__ == '__main__':
-    #parse command line arguments
+    # neptune.init('achaitanyasai/Machine-Translation-Test', api_token='eyJhcGlfYWRkcmVzcyI6Imh0dHBzOi8vdWkubmVwdHVuZS5tbCIsImFwaV9rZXkiOiIxMmU4NTM4Yy04OGVkLTQxZjktOTAzNy0wMWJlNTkwZGU4MWQifQ==')
+
+    experiment = Experiment(api_key="G1Hu2kJ89qGE5sZ1cBNlrq6Hj",
+                            project_name="test-baseline", workspace="achaitanyasai",
+                            disabled=False)
+
+    # experiment.log_asset(file_data='./models/seq2seq_attn.py', file_name='seq2seq_attn.py', overwrite=False)
+    # experiment.log_asset(file_data='./modules/Trainer.py', file_name='trainer.py', overwrite=False)
+    # experiment.log_asset(file_data='./data_iterator.py', file_name='data_iterator.py', overwrite=False)
+    # experiment.add_tag('Expt-8')
+    # experiment.add_tag('vector_space=2')
+    # experiment.add_tag('UNK percentage=5')
+    experiment.add_tag('Bidirectional')
+    experiment.add_tag('init: uniform')
+    experiment.add_tag('attn: bahdanau-additive')
+    experiment.add_tag('Word level attn + dropout 0.4')
+
+    # Adding the Run parameters
+    run_id = os.environ.get('RUN_ID')
+    run_dir = os.environ.get('RUN_DIR')
+    logger.info('Run Id: %s' % (run_id))
+    logger.info('Run Dir: %s' % (run_dir))
     args = parse_arguments()
+    args.run_id = run_id
+    args.run_dir = run_dir
 
-    #Load data
-    source_data, target_data, source_data_valid, target_data_valid, train_data_iterator, valid_data_iterator = get_data(args)
-    
-    #Build/Load model
-    encoder, decoder, model = get_model(args, source_data, target_data)
-    #encoder, decoder, model = load_model()
+    PARAMS = vars(args)
+    # neptune.create_experiment(name='test', params=PARAMS)
+    # neptune.append_tag('first-example-2')
+    # neptune.send_artifact(args.path_to_logs)
 
-    #Build criterion
-    train_criterion = get_criterion(args, target_data)
-    valid_criterion = get_criterion(args, target_data)
+    experiment.log_parameters(PARAMS)
 
-    #Build optimizer
-    optimizer = get_optimizer(args, model)
-    #Train model
-    train_model(args, model, train_criterion, valid_criterion, optimizer,
-                source_data, target_data, source_data_valid, target_data_valid, 
-                train_data_iterator, valid_data_iterator)
-    
+    iterators = getIterators(args)
+
+    model = buildModel(args, iterators.train_iterator)
+    # model = loadModel(args)
+    args.model = model
+    args.iterators = iterators
+
+    criterions = getCriterions(args)
+    args.train_loss = criterions.train_criterion
+    args.valid_loss = criterions.valid_criterion
+
+    optimizer = getOptimizer(args)
+    args.optimizer = optimizer
+
+    # train(args)
+
+    translate(args, iterators)
+
+    s = os.popen('perl %s/.guild/sourcecode/scripts/bleu-1.04.pl /tmp/a.txt < ./data/predicted.txt' % run_dir).read().strip()
+
+    bleu = 0.0
+    try:
+        bleu = float(s.split(',')[0].replace('BLEU = ', ''))
+    except Exception:
+        pass
+
+    logger.info('BLEU score: %.3f' % bleu)
+
+    experiment.log_metric('Bleu score', bleu)
+    experiment.log_asset('./data/training_logs.txt')
+    experiment.log_asset_folder('./models')
+    experiment.log_asset_folder('./modules')
+
+    # Please explicitly delete the objects in which you have __del__ method implemented.
+    del args
+    del iterators

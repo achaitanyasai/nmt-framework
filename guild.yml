@@ -1,0 +1,92 @@
+- model: nmt
+  description: NMT
+  sourcecode:
+    - '*.py'
+    - '*.sh'
+    - '*.pl'
+  operations:
+    train:
+      description: Train the CNN
+      main: nmt
+      flags:
+        train_dataset:
+          description: Path to training corpus in csv file
+          default: "/home/chaitanya/Datasets/hindi-english/train.hn-en.csv"
+        valid_dataset:
+          description: Path to validation corpus in csv file
+          default: "/home/chaitanya/Datasets/hindi-english/valid.hn-en.csv"
+        test_dataset:
+          description: Path to test corpus in csv file
+          default: "/home/chaitanya/Datasets/hindi-english/test.hn-en.csv"
+        save_to:
+          description: Path to test corpus in csv file
+          default: "data/model.pt"
+        path_to_logs:
+          default: "data/training_logs.txt"
+        save_freq:
+          default: 10000000
+        source_max_len:
+          default: 50
+        target_max_len:
+          default: 50
+        source_max_vocab_size:
+          default: 36000
+        target_max_vocab_size:
+          default: 26000
+#        use_epochs:
+#          arg-switch: no
+#        ignore_too_many_unknowns:
+#          arg-switch: no
+        bidirectional:
+          default: 1
+        encoder_num_layers:
+          default: 2
+        encoder_hidden_dim:
+          default: 500
+        encoder_embedding_dim:
+          default: 500
+        encoder_dropout:
+          default: 0.4
+        decoder_num_layers:
+          default: 2
+        decoder_hidden_dim:
+          default: 500
+        decoder_embedding_dim:
+          default: 500
+        decoder_dropout:
+          default: 0.4
+        decoder_attention_type:
+          default: "general"
+        optimizer:
+          default: "sgd"
+        lrate:
+          default: 1
+        max_grad_norm:
+          default: 5.0
+        start_decay_at:
+          default: 15000
+        decay_lrate_steps:
+          default: 1000
+        steps:
+          default: 20000
+        lrate_decay:
+          default: 0.5
+#        TODO: check warmup steps
+        warmup_steps:
+          default: 0
+
+#        TODO: Fix the adam_beta1 and adam_beta2 values
+        adam_beta1:
+          default: 0
+        adam_beta2:
+          default: 0
+
+        batch_size:
+          default: 80
+
+        norm_method:
+          default: "sents"
+
+
+  references:
+    - Some ref

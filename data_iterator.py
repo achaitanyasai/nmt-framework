@@ -18,14 +18,7 @@ import operator
 import tqdm
 import base_config as config
 import csv
-
-logger = logging.getLogger('simple_example')
-logger.setLevel(logging.DEBUG)
-fh = logging.FileHandler('./data/training_logs.txt')
-fh.setLevel(logging.DEBUG)
-formatter = logging.Formatter('%(asctime)s %(levelname)s %(pathname)s:%(lineno)d - %(message)s','%Y-%m-%d:%H:%M:%S')
-fh.setFormatter(formatter)
-logger.addHandler(fh)
+from structs import *
 
 class BatchData(object):
     '''
@@ -36,15 +29,22 @@ class BatchData(object):
         self.indices = indices
         self.src = src  # Source sequence of shape: seq_len x batch_size
         self.tgt = tgt  # Target sequence of shape: seq_len x batch_size or None
-        self.src_len = src_len #lengths of the source sequence. Shape: batch_size
-        self.tgt_len = tgt_len #lengths of the target sequence. Shape: batch_size or None
+        self.src_lens = src_len #lengths of the source sequence. Shape: batch_size
+        self.tgt_lens = tgt_len #lengths of the target sequence. Shape: batch_size or None
         self.src_raw = src_raw #Raw source sentences
         self.tgt_raw = tgt_raw #Raw target sentences or None
         self.batch_size = batch_size #Number of samples in current batch
-        self.src_hashes = None
-        self.tgt_hashes = None
+
+    def transpose(self):
+        self.src = self.src.transpose(0, 1)
+        try:
+            self.tgt = self.tgt.transpose(0, 1)
+        except Exception:
+            pass
 
 class Field(object):
+    logger.error('Lowercase, check if it\'s correct: "# FIXME: applying lower() here:"')
+
     def __init__(self, lang_type, max_vocab_size=-1, ignore_too_many_unknowns=False):
         assert lang_type in ['source', 'target']
         self.langType = lang_type
@@ -113,20 +113,32 @@ class Field(object):
                     _ = __d[word]
                 except KeyError:
                     continue
-                if word not in self.word2idx:
-                    self.word2idx[word] = self.nWords
-                    self.word2count[word] = 1
-                    self.idx2word[self.nWords] = word
-                    self.nWords += 1
-                else:
-                    self.word2count[word] += 1
+                self.add_word(word)
+                # Remove the below snippet
+                # if word not in self.word2idx:
+                #     self.word2idx[word] = self.nWords
+                #     self.word2count[word] = 1
+                #     self.idx2word[self.nWords] = word
+                #     self.nWords += 1
+                # else:
+                #     self.word2count[word] += 1
         del _sd
         del _d
         del __d
 
-    def sentence2indices(self, sent, max_len=0):
+    def add_word(self, word):
+        if word not in self.word2idx:
+            self.word2idx[word] = self.nWords
+            self.word2count[word] = 1
+            self.idx2word[self.nWords] = word
+            self.nWords += 1
+        else:
+            self.word2count[word] += 1
+
+
+    def sentence2indices(self, sent, add_sos=False, add_eos=False, max_len=0):
         if type(sent) == type(''):
-            sent = sent.lstrip().rstrip().split()
+            sent = sent.lower().lstrip().rstrip().split()
         assert type(sent) == type([])
         if len(sent) == 0:
             logger.warning('Empty sentence')
@@ -134,6 +146,12 @@ class Field(object):
         assert type(sent[0]) == type('')
         resIdx = []
         resStr = []
+        if self.langType == 'target':
+            if add_sos and add_eos:
+                sent = ['SOS'] + sent + ['EOS']
+            else:
+                logger.warning('SOS and EOS tokens are not being added')
+
         for _word in sent:
             if _word in self.word2idx:
                 if _word == 'UNK':
@@ -144,15 +162,19 @@ class Field(object):
             resStr.append(word)
             resIdx.append(self.word2idx[word])
 
-        while len(resIdx) < max_len:
+        while len(resIdx) < max_len + add_sos + add_eos:
             word = 'PAD'
             resIdx.append(self.word2idx[word])
             resStr.append(word)
-
+        # assert len(resIdx) <= max_len + add_sos + add_eos
         return resIdx, resStr
 
     def vec2sentence(self, vec):
-        pass
+        assert type(vec) == type([])
+        res = []
+        for i in vec:
+            res.append(self.idx2word[i])
+        return ' '.join(res)
 
 class DataIterator(object):
     '''
@@ -163,9 +185,12 @@ class DataIterator(object):
     def __init__(self, fields=None, fname=None, shuffle=True, data_type=None,
                  src_max_len=None, tgt_max_len=None, src_max_vocab_size=None,
                  tgt_max_vocab_size=None, ignore_too_many_unknowns=None,
-                 cleanup=True):
+                 cleanup=True, break_on_stop_iteration=True,
+                 tie_embeddings=False):
 
+        logger.warning('Add tests for tie embedding')
         self.cleanup = cleanup
+        self.break_on_stop_iteration = break_on_stop_iteration
         assert fname is not None
 
         if shuffle:
@@ -200,12 +225,23 @@ class DataIterator(object):
         self.csvReader = None
 
         self.reset()
+        self.tie_embeddings = tie_embeddings
+        if tie_embeddings and data_type == 'train':
+            for word in self.sourceField.word2idx:
+                self.targetField.add_word(word)
+            self.sourceField.nWords = self.targetField.nWords
+            self.sourceField.word2idx = self.targetField.word2idx
+            self.sourceField.idx2word = self.targetField.idx2word
+            self.sourceField.word2count = self.targetField.word2count
         del fields
 
     def __del__(self):
         if self.cleanup:
             try:
-                logger.info('Removing %s' % self.preprocessedfname)
+                try:
+                    logger.info('Removing %s' % self.preprocessedfname)
+                except NameError:
+                    pass
                 os.remove(self.preprocessedfname)
             except (OSError, FileNotFoundError):
                 pass
@@ -217,7 +253,7 @@ class DataIterator(object):
 
     def copy_file(self, source_file, destination_file):
         f = open(source_file)
-        x = f.read().strip()
+        x = f.read().lower().strip()
         f.close()
 
         f = open(destination_file, 'w')
@@ -233,8 +269,9 @@ class DataIterator(object):
         src = []
         tgt = []
         for row in csv.reader(csvFile, delimiter=",", quotechar='"'):
-            cur_src = row[0].strip().split()
-            cur_tgt = row[1].strip().split()
+            # FIXME: applying lower() here
+            cur_src = row[0].lower().strip().split()
+            cur_tgt = row[1].lower().strip().split()
             # Note that this should only be done to training data.
             if (len(cur_src) <= src_max_len + 0) and (len(cur_tgt) <= tgt_max_len + 0):
                 src.append(cur_src)
@@ -268,8 +305,8 @@ class DataIterator(object):
             for i in range(L):
                 src = rows[self.order[i]][0]
                 tgt = rows[self.order[i]][1]
-                cur_src = src.strip().split()
-                cur_tgt = tgt.strip().split()
+                cur_src = src.lower().strip().split()
+                cur_tgt = tgt.lower().strip().split()
                 # Note that this should only be done to training data.
                 if (len(cur_src) <= self.src_max_len + 0) and (len(cur_tgt) <= self.tgt_max_len + 0):
                     csvwriter.writerow([src, tgt])
@@ -280,9 +317,9 @@ class DataIterator(object):
         with open(self.preprocessedfname) as fileDescriptor:
             self.csvReader = csv.reader(fileDescriptor)
             for row in self.csvReader:
-                source_sentence = row[0]
-                if self.dataType == 'train':
-                    target_sentence = row[1]
+                source_sentence = row[0].lower()
+                if self.dataType in ['train', 'valid']:
+                    target_sentence = row[1].lower()
                 else:
                     target_sentence = None
                 yield (source_sentence, target_sentence, self.sentidx)
@@ -314,18 +351,26 @@ class DataIterator(object):
                 n_samples += 1
                 i += 1
             except StopIteration:
+                #############################
+                # Fixed by adding self.break_on_stop_iteration variable
                 # TODO: uncomment below line and remove break if you want to use updates instead of epochs.
                 # self.reset()
-                break
-            except Exception as e:
-                # FIXME: continue or break??
-                i += 1
-                continue
+                # break
+                #############################
+                if self.break_on_stop_iteration:
+                    break
+                else:
+                    self.reset()
+            # TODO: Do we need to catch and ignore exception?
+            # except Exception as e:
+            #     i += 1
+            #     continue
 
         if len(src_lines_unsorted) == 0:
             return None
 
         src_max_len = max(src_lens_unsorted)
+        tgt_max_len = 0
         if len(tgt_lens_unsorted) > 0:
             tgt_max_len = max(tgt_lens_unsorted)
 
@@ -351,7 +396,7 @@ class DataIterator(object):
         src_lens = torch.LongTensor(src_lens).cuda()
         if len(tgt_lens_unsorted) > 0:
             for i in indices:
-                y = self.targetField.sentence2indices(tgt_lines_unsorted[i], max_len=tgt_max_len)
+                y = self.targetField.sentence2indices(tgt_lines_unsorted[i], add_sos=True, add_eos=True, max_len=tgt_max_len)
                 tgt_lines.append(y[0])
                 tgt_raw.append(tgt_lines_unsorted[i])
                 tgt_lens.append(tgt_lens_unsorted[i])

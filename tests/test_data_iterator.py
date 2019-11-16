@@ -99,6 +99,8 @@ class testDataIterator(unittest.TestCase):
         pass
 
     def test___init__(self):
+        import random
+        random.seed(8595)
         with self.assertRaises(AssertionError) as _:
             _ = data_iterator.DataIterator(fields=None, fname=None, shuffle=True, data_type=None,
                                                   src_max_len=None, tgt_max_len=None, src_max_vocab_size=None,
@@ -204,25 +206,25 @@ class testDataIterator(unittest.TestCase):
         a = train_iterator.next_batch(1)
         self.assertTrue(torch.eq(a.src, torch.tensor([[5]]).cuda()))
         self.assertEqual(a.src_raw, [['22']])
-        self.assertTrue(torch.eq(a.tgt, torch.tensor([[7]]).cuda()))
+        self.assertTrue(torch.all(torch.eq(a.tgt, torch.tensor([[2, 7, 3]]).cuda())))
         self.assertEqual(a.tgt_raw, [['17']])
         # =========================================
         a = train_iterator.next_batch(1)
         self.assertTrue(torch.all(torch.eq(a.src, torch.tensor([[2, 3]]).cuda())))
         self.assertEqual(a.src_raw, [['hello', 'world']])
-        self.assertTrue(torch.all(torch.eq(a.tgt, torch.tensor([[4, 5]]).cuda())))
+        self.assertTrue(torch.all(torch.eq(a.tgt, torch.tensor([[2, 4, 5, 3]]).cuda())))
         self.assertEqual(a.tgt_raw, [['hello', 'world']])
         # =========================================
         a = train_iterator.next_batch(1)
         self.assertTrue(torch.all(torch.eq(a.src, torch.tensor([[4]]).cuda())))
         self.assertEqual(a.src_raw, [['okrst']])
-        self.assertTrue(torch.all(torch.eq(a.tgt, torch.tensor([[6]]).cuda())))
+        self.assertTrue(torch.all(torch.eq(a.tgt, torch.tensor([[2, 6, 3]]).cuda())))
         self.assertEqual(a.tgt_raw, [['okrst']])
         # =========================================
         a = train_iterator.next_batch(1)
         self.assertTrue(torch.all(torch.eq(a.src, torch.tensor([[6, 5]]).cuda())))
         self.assertEqual(a.src_raw, [['asdf', '22']])
-        self.assertTrue(torch.all(torch.eq(a.tgt, torch.tensor([[7, 8]]).cuda())))
+        self.assertTrue(torch.all(torch.eq(a.tgt, torch.tensor([[2, 7, 8, 3]]).cuda())))
         self.assertEqual(a.tgt_raw, [['17', 'qwe']])
         # =========================================
         a = train_iterator.next_batch(1)
@@ -237,18 +239,161 @@ class testDataIterator(unittest.TestCase):
         a = train_iterator.next_batch(1)
         self.assertTrue(torch.eq(a.src, torch.tensor([[3]]).cuda()))
         self.assertEqual(a.src_raw, [['22']])
-        self.assertTrue(torch.eq(a.tgt, torch.tensor([[5]]).cuda()))
+        self.assertTrue(torch.all(torch.eq(a.tgt, torch.tensor([[2, 5, 3]]).cuda())))
         self.assertEqual(a.tgt_raw, [['17']])
         # =========================================
         a = train_iterator.next_batch(1)
         self.assertTrue(torch.all(torch.eq(a.src, torch.tensor([[2]]).cuda())))
         self.assertEqual(a.src_raw, [['okrst']])
-        self.assertTrue(torch.all(torch.eq(a.tgt, torch.tensor([[4]]).cuda())))
+        self.assertTrue(torch.all(torch.eq(a.tgt, torch.tensor([[2, 4, 3]]).cuda())))
         self.assertEqual(a.tgt_raw, [['okrst']])
         # =========================================
         a = train_iterator.next_batch(1)
         self.assertEqual(a, None)
         # =========================================
+
+    def test_next_batch_multiple_samples(self):
+        train_iterator = data_iterator.DataIterator(fields=None, fname='./tests/toy_copy/train.csv', shuffle=False,
+                                                    data_type='train',
+                                                    src_max_len=100, tgt_max_len=100, src_max_vocab_size=10000,
+                                                    tgt_max_vocab_size=10000, ignore_too_many_unknowns=True)
+        a = train_iterator.next_batch(5)
+        src = a.src.data.cpu().numpy().tolist()
+        req_src_raw = [
+            '16 3 6 15 13 13 笑 16 8 9 10 16 10 5 8 9 7 5',
+            '14 5 4 1 笑 16 12 4 13 3 10 18 7 17 8 6 18',
+            '9 7 9 14 1 17 8 2 17 9 笑 15 2 12 18 12',
+            '4 16 3 笑 10 笑 18 17 14 6 8 13 5 笑 11 10',
+            '0 18 7 笑 8 7 14 1 12 12 10 18 3 11'
+        ]
+        req_src = [
+            '16 3 6 15 13 13 笑 16 8 9 10 16 10 5 8 9 7 5',
+            '14 5 4 1 笑 16 12 4 13 3 10 18 7 17 8 6 18 PAD',
+            '9 7 9 14 1 17 8 2 17 9 笑 15 2 12 18 12 PAD PAD',
+            '4 16 3 笑 10 笑 18 17 14 6 8 13 5 笑 11 10 PAD PAD',
+            '0 18 7 笑 8 7 14 1 12 12 10 18 3 11 PAD PAD PAD PAD'
+        ]
+        for i, j, k, l in zip(src, req_src, a.src_raw, req_src_raw):
+            self.assertEqual(j, train_iterator.sourceField.vec2sentence(i))
+            self.assertEqual(k, l.split())
+            self.assertEqual(len(i), 18)
+        # =========================================
+        tgt = a.tgt.data.cpu().numpy().tolist()
+        req_tgt_raw = [
+            '16 3 6 15 13 13 笑 16 8 9 10 16 10 5 8 9 7 5',
+            '14 5 4 1 笑 16 12 4 13 3 10 18 7 17 8 6 18',
+            '9 7 9 14 1 17 8 2 17 9 笑 15 2 12 18 12',
+            '4 16 3 笑 10 笑 18 17 14 6 8 13 5 笑 11 10',
+            '0 18 7 笑 8 7 14 1 12 12 10 18 3 11'
+        ]
+        req_tgt = [
+            'SOS 16 3 6 15 13 13 笑 16 8 9 10 16 10 5 8 9 7 5 EOS',
+            'SOS 14 5 4 1 笑 16 12 4 13 3 10 18 7 17 8 6 18 EOS PAD',
+            'SOS 9 7 9 14 1 17 8 2 17 9 笑 15 2 12 18 12 EOS PAD PAD',
+            'SOS 4 16 3 笑 10 笑 18 17 14 6 8 13 5 笑 11 10 EOS PAD PAD',
+            'SOS 0 18 7 笑 8 7 14 1 12 12 10 18 3 11 EOS PAD PAD PAD PAD'
+        ]
+        for i, j, k, l in zip(tgt, req_tgt, a.tgt_raw, req_tgt_raw):
+            self.assertEqual(j, train_iterator.targetField.vec2sentence(i))
+            self.assertEqual(k, l.split())
+            self.assertEqual(len(i), 20)
+
+    def test_next_batch_testset(self):
+        train_iterator = data_iterator.DataIterator(fields=None, fname='./tests/toy_copy/train.csv', shuffle=False,
+                                                    data_type='train',
+                                                    src_max_len=100, tgt_max_len=100, src_max_vocab_size=10000,
+                                                    tgt_max_vocab_size=10000, ignore_too_many_unknowns=True)
+
+        valid_iterator = data_iterator.DataIterator(fields=(train_iterator.sourceField, train_iterator.targetField), fname='./tests/toy_copy/valid.csv', shuffle=False,
+                                                    data_type='valid',
+                                                    src_max_len=100, tgt_max_len=100, src_max_vocab_size=10000,
+                                                    tgt_max_vocab_size=10000, ignore_too_many_unknowns=True)
+
+        a = valid_iterator.next_batch(2)
+        src = a.src.data.cpu().numpy().tolist()
+        req_src_raw = [
+            ['9', '18', '15', '笑', '3', '16', '2', '笑', '5', '15', '4', '4', '17', '10', '2', '1', '1', '3'],
+            ['6', '13', '4', '14', '10', '4', '2', '6', '5', '4', '14']
+        ]
+        req_src = [
+            ['9', '18', '15', '笑', '3', '16', '2', '笑', '5', '15', '4', '4', '17', '10', '2', '1', '1', '3'],
+            ['6', '13', '4', '14', '10', '4', '2', '6', '5', '4', '14', 'PAD', 'PAD', 'PAD', 'PAD', 'PAD', 'PAD', 'PAD']
+        ]
+        for i, j, k, l in zip(src, req_src, a.src_raw, req_src_raw):
+            self.assertEqual(j, train_iterator.sourceField.vec2sentence(i).split())
+            self.assertEqual(k, l)
+            self.assertEqual(len(i), 18)
+#        Not required to test the tgt.
+
+
+class testDataIterator1(unittest.TestCase):
+
+    def setUp(self):
+        pass
+
+    def test_break_on_stop_iteration(self):
+        train_iterator = data_iterator.DataIterator(fields=None, fname='./tests/toy_very_small/data.csv', shuffle=False,
+                                              data_type='train',
+                                              src_max_len=100, tgt_max_len=100, src_max_vocab_size=100,
+                                              tgt_max_vocab_size=100, ignore_too_many_unknowns=True,
+                                              break_on_stop_iteration=False)
+        R = random.randint(10, 20)
+        for i in range(R):
+            a = train_iterator.next_batch(1)
+            self.assertTrue(torch.all(torch.eq(a.src, torch.tensor([[2, 3]]).cuda())))
+            self.assertEqual(a.src_raw, [['hello', 'world']])
+            self.assertTrue(torch.all(torch.eq(a.tgt, torch.tensor([[2, 4, 5, 3]]).cuda())))
+            self.assertEqual(a.tgt_raw, [['hello', 'world']])
+            # =========================================
+            a = train_iterator.next_batch(1)
+            self.assertTrue(torch.all(torch.eq(a.src, torch.tensor([[4]]).cuda())))
+            self.assertEqual(a.src_raw, [['okrst']])
+            self.assertTrue(torch.all(torch.eq(a.tgt, torch.tensor([[2, 6, 3]]).cuda())))
+            self.assertEqual(a.tgt_raw, [['okrst']])
+            # =========================================
+            a = train_iterator.next_batch(1)
+
+            self.assertTrue(torch.eq(a.src, torch.tensor([[5]]).cuda()))
+            self.assertEqual(a.src_raw, [['22']])
+            self.assertTrue(torch.all(torch.eq(a.tgt, torch.tensor([[2, 7, 3]]).cuda())))
+            self.assertEqual(a.tgt_raw, [['17']])
+            # =========================================
+            a = train_iterator.next_batch(1)
+            self.assertTrue(torch.all(torch.eq(a.src, torch.tensor([[6, 5]]).cuda())))
+            self.assertEqual(a.src_raw, [['asdf', '22']])
+            self.assertTrue(torch.all(torch.eq(a.tgt, torch.tensor([[2, 7, 8, 3]]).cuda())))
+            self.assertEqual(a.tgt_raw, [['17', 'qwe']])
+            # =========================================
+
+    def test_break_on_stop_iteration_shuffle(self):
+        train_iterator = data_iterator.DataIterator(fields=None, fname='./tests/toy_very_small/data.csv', shuffle=True,
+                                              data_type='train',
+                                              src_max_len=100, tgt_max_len=100, src_max_vocab_size=100,
+                                              tgt_max_vocab_size=100, ignore_too_many_unknowns=True,
+                                              break_on_stop_iteration=False)
+        R = random.randint(10, 20)
+        X = []
+        Y = list([[[5]]] * R)
+        Y +=  list([[[2, 3]]] * R)
+        Y += list([[[4]]] * R)
+        Y += list([[[6, 5]]] * R)
+
+        for i in range(R):
+            a = train_iterator.next_batch(1)
+            X.append(a.src.data.cpu().numpy().tolist())
+            # =========================================
+            a = train_iterator.next_batch(1)
+            X.append(a.src.data.cpu().numpy().tolist())
+            # =========================================
+            a = train_iterator.next_batch(1)
+            X.append(a.src.data.cpu().numpy().tolist())
+            # =========================================
+            a = train_iterator.next_batch(1)
+            X.append(a.src.data.cpu().numpy().tolist())
+            # =========================================
+        X.sort()
+        Y.sort()
+        self.assertEqual(X, Y)
 
 if __name__ == '__main__':
    unittest.main()

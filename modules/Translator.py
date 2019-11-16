@@ -1,8 +1,9 @@
 import torch
 from torch.autograd import Variable
 
-import Beam
-import utils
+from . import Beam
+from . import utils
+from structs import *
 
 
 class Translator(object):
@@ -22,27 +23,28 @@ class Translator(object):
         self.beam_trace = beam_trace
         self.min_length = min_length
     
-    def get_char_features(self, inp):
-        res = []
-        res_len = []
-        
-        inp = inp.transpose(0, 1)
-        for i in inp:
-            idx = i.data.cpu().numpy()[0]
-            word = self.target_data.idx2word[idx]
-            if(word == ''):
-                word = 'UNK'
-            ret = self.target_data.word2HashSequence(word, None, 2)
-            res.append(ret)
-        
-        res = Variable(torch.LongTensor(res), requires_grad=False).cuda()
-        res = res.unsqueeze(0)
-        res = res.transpose(0, 1)
-        return res
+    # def get_char_features(self, inp):
+    #     res = []
+    #     res_len = []
+    #
+    #     inp = inp.transpose(0, 1)
+    #     for i in inp:
+    #         idx = i.data.cpu().numpy()[0]
+    #         word = self.target_data.idx2word[idx]
+    #         if(word == ''):
+    #             word = 'UNK'
+    #         ret = self.target_data.word2HashSequence(word, None, 2)
+    #         res.append(ret)
+    #
+    #     res = torch.LongTensor(res, requires_grad=False).cuda()
+    #     res = res.unsqueeze(0)
+    #     res = res.transpose(0, 1)
+    #     return res
 
     def translate_batch(self, batch):
-        src, src_lengths = batch.src, batch.src_len
-        lines_src_hashes = batch.src_hashes
+        batch.transpose()
+        src, src_lengths = batch.src, batch.src_lens
+        lines_src_hashes = None
 
         beam_size = self.beam_size
         batch_size = batch.batch_size
@@ -52,14 +54,18 @@ class Translator(object):
                      global_scorer=self.global_scorer, pad=vocab['PAD'],
                      eos=vocab['EOS'], bos=vocab['SOS'], min_length=self.min_length)
                 for _ in range(batch_size)]
-        enc_states, enc_rnn_input, context, penalty = self.model.encoder(src, lines_src_hashes, src_lengths)
-        dec_states = self.model.decoder.init_decoder_state(src, context, enc_states)
+
+        enc_hidden, context, penalty, encoder_embeddings = self.model.encoder(src, None, src_lengths)
+        encoderOutputs = EncoderOutputs(enc_hidden, context, encoder_embeddings)
+        dec_states = self.model.decoder.init_decoder_state(src, context, enc_hidden)
+
+        # dec_states = self.model.decoder.init_decoder_state(src, context, enc_states)
         
         if src_lengths is None:
             src_lengths = torch.Tensor(batch_size).type_as(context.data).long().fill_(context.size(0))
                 
         context = utils.rvar(context.data, beam_size)
-        enc_rnn_input = utils.rvar(enc_rnn_input.data, beam_size)
+        enc_rnn_input = utils.rvar(encoder_embeddings.data, beam_size)
         context_lengths = src_lengths.repeat(beam_size)
         dec_states.repeat_beam_size_times(beam_size)
 
@@ -75,7 +81,11 @@ class Translator(object):
                 #Unimplemented
             
             char_inp = None#self.get_char_features(inp)
-            dec_out, dec_states, attn, _ = self.model.decoder(inp, char_inp, enc_rnn_input, context, dec_states, context_lengths = context_lengths)
+
+            dec_out, dec_states, attn, _ = self.model.decoder(inp, None, context,
+                                                              enc_rnn_input, dec_states,
+                                                              context_lengths=context_lengths)
+            # dec_out, dec_states, attn, _ = self.model.decoder(inp, char_inp, enc_rnn_input, context, dec_states, context_lengths = context_lengths)
             dec_out = dec_out.squeeze(0)
 
             if not self.copy_attn:
@@ -157,7 +167,7 @@ class TranslationBuilder(object):
     def from_batch(self, translation_batch, batch):
         assert(len(translation_batch['gold_score']) == len(translation_batch['predictions']))
         
-        src, src_lengths = batch.src, batch.src_len
+        src, src_lengths = batch.src, batch.src_lens
 
         batch_size = batch.batch_size
         assert(src.size(1) == batch_size)
@@ -169,7 +179,7 @@ class TranslationBuilder(object):
                         translation_batch["gold_score"],
                         batch.indices),
                     key=lambda x: x[-1])))
-        inds, perm = torch.sort(batch.indices)
+        inds, perm = torch.sort(torch.tensor(batch.indices).cuda())
         src = src.data.index_select(1, perm)
         translations = []
         

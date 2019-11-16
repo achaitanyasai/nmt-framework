@@ -1,0 +1,8 @@
+2019-09-01 | 14:36:41    ERROR --- Lowercase (data_iterator.py:43)
+2019-09-01 | 14:36:41     INFO --- Removing ./tests/toy_copy/train.csv.tmp (data_iterator.py:217)
+2019-11-09 | 09:52:13    ERROR --- Lowercase (data_iterator.py:43)
+2019-11-09 | 09:52:13  WARNING --- Add tests for tie embedding (data_iterator.py:188)
+2019-11-09 | 09:52:13     INFO --- Removing ./tests/toy_copy/train.csv.tmp (data_iterator.py:239)
+2019-11-09 | 09:52:24    ERROR --- Lowercase (data_iterator.py:43)
+2019-11-09 | 09:52:24  WARNING --- Add tests for tie embedding (data_iterator.py:188)
+2019-11-09 | 09:52:24     INFO --- Removing ./tests/toy_copy/train.csv.tmp (data_iterator.py:239)

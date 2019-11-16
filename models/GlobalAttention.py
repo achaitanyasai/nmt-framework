@@ -1,7 +1,8 @@
 import torch
 import torch.nn as nn
 
-from utils import aeq, sequence_mask, BottleLinear
+from . utils import aeq, sequence_mask, BottleLinear
+# from utils import aeq, sequence_mask, BottleLinear
 
 # Global Attention module taken from OpenNMT
 # https://github.com/OpenNMT/OpenNMT-py/blob/master/onmt/modules/GlobalAttention.py
@@ -69,14 +70,14 @@ class GlobalAttention(nn.Module):
                 "Please select a valid attention type.")
 
         if self.attn_type == "general":
-            self.linear_in = nn.Linear(dim, dim, bias=False)
+            self.linear_in = nn.Linear(dim,  2 * dim, bias=False)
         elif self.attn_type == "mlp":
             self.linear_context = BottleLinear(dim, dim, bias=False)
             self.linear_query = nn.Linear(dim, dim, bias=True)
             self.v = BottleLinear(dim, 1, bias=False)
         # mlp wants it with bias
         out_bias = self.attn_type == "mlp"
-        self.linear_out = nn.Linear(dim*2, dim, bias=out_bias)
+        self.linear_out = nn.Linear(dim*2 + dim, dim, bias=out_bias)
 
         self.sm = nn.Softmax(dim = -1)
         self.tanh = nn.Tanh()
@@ -101,14 +102,14 @@ class GlobalAttention(nn.Module):
         src_batch, src_len, src_dim = h_s.size()
         tgt_batch, tgt_len, tgt_dim = h_t.size()
         aeq(src_batch, tgt_batch)
-        aeq(src_dim, tgt_dim)
-        aeq(self.dim, src_dim)
+        aeq(src_dim, 2 * tgt_dim)
+        aeq(2 * self.dim, src_dim)
 
         if self.attn_type in ["general", "dot"]:
             if self.attn_type == "general":
                 h_t_ = h_t.view(tgt_batch*tgt_len, tgt_dim)
                 h_t_ = self.linear_in(h_t_)
-                h_t = h_t_.view(tgt_batch, tgt_len, tgt_dim)
+                h_t = h_t_.view(tgt_batch, tgt_len, 2 * tgt_dim)
             h_s_ = h_s.transpose(1, 2)
             # (batch, t_len, d) x (batch, d, s_len) --> (batch, t_len, s_len)
             return torch.bmm(h_t, h_s_)
@@ -154,17 +155,8 @@ class GlobalAttention(nn.Module):
         batch, sourceL, dim = context.size()
         batch_, targetL, dim_ = input.size()
         aeq(batch, batch_)
-        aeq(dim, dim_)
-        aeq(self.dim, dim)
-        if coverage is not None:
-            batch_, sourceL_ = coverage.size()
-            aeq(batch, batch_)
-            aeq(sourceL, sourceL_)
-
-        if coverage is not None:
-            cover = coverage.view(-1).unsqueeze(1)
-            context += self.linear_cover(cover).view_as(context)
-            context = self.tanh(context)
+        aeq(dim, 2 * dim_)
+        aeq(2 * self.dim, dim)
 
         # compute attention scores, as in Luong et al.
         align = self.score(input, context)
@@ -172,7 +164,9 @@ class GlobalAttention(nn.Module):
         if context_lengths is not None:
             mask = sequence_mask(context_lengths)
             mask = mask.unsqueeze(1)  # Make it broadcastable.
-            align.data.masked_fill_(1 - mask, -float('inf'))
+            mask = 1 - mask.type(torch.float32)
+            mask = mask.type(torch.bool)
+            align.data.masked_fill_(mask, -float('inf'))
 
         # Softmax to normalize attention weights
         align_vectors = self.sm(align.view(batch*targetL, sourceL))
@@ -183,8 +177,8 @@ class GlobalAttention(nn.Module):
         c = torch.bmm(align_vectors, context)
 
         # concatenate
-        concat_c = torch.cat([c, input], 2).view(batch*targetL, dim*2)
-        attn_h = self.linear_out(concat_c).view(batch, targetL, dim)
+        concat_c = torch.cat([c, input], 2).view(batch*targetL, 2 * self.dim + self.dim)
+        attn_h = self.linear_out(concat_c).view(batch, targetL, self.dim)
         if self.attn_type in ["general", "dot"]:
             attn_h = self.tanh(attn_h)
 
@@ -195,7 +189,7 @@ class GlobalAttention(nn.Module):
             # Check output sizes
             batch_, dim_ = attn_h.size()
             aeq(batch, batch_)
-            aeq(dim, dim_)
+            aeq(dim, 2 * dim_)
             batch_, sourceL_ = align_vectors.size()
             aeq(batch, batch_)
             aeq(sourceL, sourceL_)

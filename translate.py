@@ -22,10 +22,12 @@ from torch import optim
 from torch.autograd import Variable
 from torch.nn.utils import clip_grad_norm
 
+from data_iterator import *
 import data_iterator
 import util
-from models import seq2seq_attn
+from models import seq2seq_attn, seq2seq_attn_baseline, seq2seq_attn_multivec
 from modules import Beam, Loss, Optimizer, Trainer, Translator
+# from structs import *
 
 use_cuda = torch.cuda.is_available()
 
@@ -119,29 +121,76 @@ def get_data(args):
 
     return source_data, target_data, source_data_test, None, data_iter, data_iter_test
 
-def load_model(args):
+def load_model(args, train_iterator):
     print(args.model)
-    model = torch.load(args.model)
+
+    logger.info('Building Encoder')
+    encoder = seq2seq_attn_multivec.encoder(
+        'LSTM',
+        bidirectional=True,
+        num_layers=2,
+        hidden_size=500,
+        vocab_size=train_iterator.sourceField.nWords,
+        embedding_dim=500,
+        pad_token=train_iterator.sourceField.word2idx['PAD'],
+        dropout=0.4
+    ).cuda()
+
+    logger.info('Building Decoder')
+    decoder = seq2seq_attn_multivec.decoder(
+        'LSTM',
+        bidirectional_encoder=True,
+        num_layers=2,
+        hidden_size=500,
+        vocab_size=train_iterator.targetField.nWords,
+        embedding_dim=500,
+        pad_token=train_iterator.targetField.word2idx['PAD'],
+        attn_type='general',
+        dropout=0.4
+    ).cuda()
+
+    logger.info('Building Model')
+    model = seq2seq_attn_multivec.Seq2SeqAttention(encoder, decoder).cuda()
+
+    model.load_state_dict(torch.load(args.model))
     model.eval()
+    logger.info(model)
     return model
+
+def getIterators(args):
+    logger.info("Loading train iterator")
+    train_iterator = data_iterator.DataIterator(fields=None, fname='./dataset/train.hn-en.csv', shuffle=True,
+                                                data_type='train', src_max_len=50, tgt_max_len=50,
+                                                src_max_vocab_size=37000, tgt_max_vocab_size=27000,
+                                                ignore_too_many_unknowns=False,
+                                                break_on_stop_iteration=False)
+
+
+    logger.info("Loading test iterator")
+    test_iterator = data_iterator.DataIterator(fields=(train_iterator.sourceField, train_iterator.targetField),
+                                                fname='./dataset/test.hn-en.csv', shuffle=False,
+                                                data_type='test')
+    return TrainValidTestIterator(train_iterator, None, test_iterator)
 
 if __name__ == '__main__':
     args = parse_arguments()
     
     #Load data
-    source_data, target_data, test_source_data, test_target_data, train_data_iterator, test_data_iterator = get_data(args)
+
+    iterators = getIterators(args)
+    # source_data, target_data, test_source_data, test_target_data, train_data_iterator, test_data_iterator = get_data(args)
 
     # print source_data.word2idx['may']
     # exit(-1)
     #Load model
-    model = load_model(args)
+    model = load_model(args, iterators.train_iterator)
 
     #Build scorer
     scorer = Beam.GNMTGlobalScorer(args.alpha, args.beta)
 
     #Build translator
     
-    translator = Translator.Translator(model, source_data, target_data, test_data_iterator,
+    translator = Translator.Translator(model, iterators.train_iterator.sourceField, iterators.train_iterator.targetField, iterators.test_iterator,
                                            beam_size=args.beam_size,
                                            n_best=args.n_best,
                                            global_scorer=scorer,
@@ -151,7 +200,7 @@ if __name__ == '__main__':
                                            beam_trace=args.dump_beam != "",
                                            min_length=args.minlen)
     
-    builder = Translator.TranslationBuilder(source_data, target_data, test_data_iterator,
+    builder = Translator.TranslationBuilder(iterators.train_iterator.sourceField, iterators.train_iterator.targetField, iterators.test_iterator,
                                                     args.n_best, args.replace_unk)
 
     pred_score_total, pred_words_total = 0, 0
@@ -159,8 +208,8 @@ if __name__ == '__main__':
 
     f = open(args.output, 'w')
 
-    while cur_batch < test_data_iterator.n_samples:
-        batch = test_data_iterator.next_batch(args.batch_size, args.maxlen, source_language_model = source_data, target_language_model = target_data)
+    while cur_batch < iterators.test_iterator.nSentences:
+        batch = iterators.test_iterator.next_batch(args.batch_size) #, args.maxlen, source_language_model = source_data, target_language_model = target_data)
         batch_data = translator.translate_batch(batch)
         
         translations = builder.from_batch(batch_data, batch)
@@ -173,7 +222,7 @@ if __name__ == '__main__':
             f.write('\n')
             f.flush()
         cur_batch += batch.batch_size
-        sys.stdout.write('%d/%d       \r' % (cur_batch, test_data_iterator.n_samples))
+        sys.stdout.write('%d/%d       \r' % (cur_batch, iterators.test_iterator.nSentences))
         sys.stdout.flush()
 
     f.close()
