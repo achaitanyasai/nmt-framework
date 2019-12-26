@@ -12,8 +12,8 @@ of = open(outputFile, 'w')
 writer = csv.writer(of, delimiter=",", quoting=csv.QUOTE_MINIMAL)
 
 for sourceLine, targetLine in zip(sf.readlines(), tf.readlines()):
-    sourceLine = sourceLine.lstrip().rstrip()
-    targetLine = targetLine.lstrip().rstrip()
+    sourceLine = sourceLine.lstrip().rstrip().lower()
+    targetLine = targetLine.lstrip().rstrip().lower()
     writer.writerow([sourceLine, targetLine])
 
 sf.close()

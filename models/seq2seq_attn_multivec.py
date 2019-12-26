@@ -470,7 +470,6 @@ class decoder(decoderBase):
 
         emb = self.embeddings(input)
 
-        context = torch.cat([context, encoder_embeddings], dim=2)
 
         s_len, batch_size, embedding_dim = emb.size()
         assert(embedding_dim == self.embedding_dim)

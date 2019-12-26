@@ -4,6 +4,7 @@
 '''
 Neural Machine Translation base module
 '''
+import json
 
 from comet_ml import Experiment
 import argparse
@@ -26,7 +27,7 @@ from torch.nn.utils import clip_grad_norm
 from data_iterator import *
 import data_iterator
 import util
-from models import seq2seq_attn, seq2seq_attn_baseline, seq2seq_attn_multivec
+from models import seq2seq_attn, seq2seq_attn_baseline, seq2seq_attn_multivec, seq2seq_attn_baseline_word_attn, seq2seq_attn_multivec_word_attn
 from modules import Loss, Optimizer, Trainer, Beam, Translator
 import subprocess
 import logging.config
@@ -54,16 +55,19 @@ def parse_arguments():
     data.add_argument("--train_dataset", type=str, required=True, metavar='PATH', help='Path to training corpus in csv file')
     data.add_argument("--valid_dataset", type=str, required=True, metavar='PATH', help='Path to validation corpus in csv file')
     data.add_argument("--test_dataset", type=str, required=True, metavar='PATH', help='Path to test corpus in csv file')
+    data.add_argument("--adagram_embeddings_dir", type=str, required=True, metavar='PATH', help='Path to adagram initialized embeddings')
+    data.add_argument("--testset_target", type=str, required=True, metavar='PATH', help='Path to target language testset')
     data.add_argument('--save_to', type=str, required=True, metavar='PATH', help='Location of model to save')
     data.add_argument('--save_freq', type=int, required=True, metavar='INT', help='Saving frequency (epochs or steps)')
     data.add_argument('--source_max_len', type=int, required=True, metavar='INT', help='Maximum length of the source sentence. Only applied to training set')
     data.add_argument('--target_max_len', type=int, required=True, metavar='INT', help='Maximum length of the target sentence. Only applied to training set')
     data.add_argument('--source_max_vocab_size', type=int, required=True, metavar='INT', help='Maximum vocabulary size of source language. Only applied to training set')
     data.add_argument('--target_max_vocab_size', type=int, required=True, metavar='INT', help='Maximum vocabulary size of target language. Only applied to training set')
-    data.add_argument('--ignore_too_many_unknowns', action='store_true', help='Ignore too many unknowns. Only applies to training set')
+    data.add_argument('--ignore_too_many_unknowns', type=int, required=True, metavar='INT', help='Ignore too many unknowns. Only applies to training set')
     data.add_argument('--path_to_logs', type=str, required=True, metavar='PATH', help='PATH to logs')
 
     network = parser.add_argument_group('Network hyper parameters')
+    network.add_argument('--model_type', type=str, required=True, metavar='STR', help='Model type i.e., baseline/multivec/etc.')
     network.add_argument('--bidirectional', type=int, required=True, metavar='INT', help='Bidirectional RNN encoder')
     network.add_argument('--encoder_num_layers', type=int, required=True, metavar='INT', help='Number of layers in RNN Encoder')
     network.add_argument('--encoder_hidden_dim', type=int, required=True, metavar='INT', help='Hidden dimension in RNN Encoder')
@@ -82,7 +86,10 @@ def parse_arguments():
     training.add_argument('--gradient_checks', action='store_true', help='Check gradients for all the weights during each update during training')
     training.add_argument('--steps', type=int, required=True, metavar='INT', help='Number of steps. If --use_epochs is used, then the value should be number of epochs')
     training.add_argument('--batch_size', type=int, required=True, metavar='INT', help='Batch size')
+    training.add_argument('--valid_steps', type=int, required=True, metavar='INT', help='Model will be evaluated on validation set after every valid_steps')
+    training.add_argument('--patience_steps', type=int, required=True, metavar='INT', help='If the validation loss does not improve after these many steps, the training will stop')
     training.add_argument('--norm_method', type=str, required=True, choices=['sents', 'tokens'], help='Normalization method')
+    training.add_argument('--expt_name', type=str, required=True, help='Experiment name for comet.ml')
 
 
     opt = parser.add_argument_group('Optimizer hyper parameters')
@@ -99,6 +106,11 @@ def parse_arguments():
     args = parser.parse_args()
 
     args.bidirectional = args.bidirectional == 1
+    args.ignore_too_many_unknowns = args.ignore_too_many_unknowns == 1
+
+    #TODO: Restructure these checks.
+    assert args.expt_name != ''
+    assert args.expt_name is not None
 
     logger.error('Change store-true arguments to integers. arg-switch in guild.yml is not working')
     # TODO: Verify arguments.
@@ -124,34 +136,36 @@ def getIterators(args):
                                                 data_type='test')
     return TrainValidTestIterator(train_iterator, valid_iterator, test_iterator)
 
-def initialize_model_parameters(model, source_word2idx):
+def initialize_model_parameters(path, model, source_word2idx):
     for p in model.parameters():
         p.data.uniform_(-0.1, 0.1)
-    path = '/home/chaitanya/Research/ShataAnuvadak/_pytorch/all_indian_languages/data/monolingual/hindi'
-    for emb_idx in range(1, 4):
-        logger.info('Reading %s/emb%d.txt' % (path, emb_idx))
-        with open('%s/emb%d.txt' % (path, emb_idx)) as f:
-            o = 0
-            for j, line in enumerate(f.readlines()):
-                if j == 0:
-                    continue
-                cur = line.strip().split(' ')
-                word = cur[0].lower()
-                wv = list(map(float, cur[1::]))
-                if word in source_word2idx:
-                    o += 1
-                    if 0 == wv[0] and 0 == wv[1] and 0 == wv[2] and 0 == wv[3]:
+    try:
+        for emb_idx in range(1, 4):
+            logger.info('Reading %s/emb%d.txt' % (path, emb_idx))
+            with open('%s/emb%d.txt' % (path, emb_idx)) as f:
+                o = 0
+                for j, line in enumerate(f.readlines()):
+                    if j == 0:
                         continue
-                    idx = source_word2idx[word]
-                    if emb_idx == 1:
-                        model.encoder.embeddings1.weight.data[idx] = torch.tensor(wv).cuda()
-                    elif emb_idx == 2:
-                        model.encoder.embeddings2.weight.data[idx] = torch.tensor(wv).cuda()
-                    elif emb_idx == 3:
-                        model.encoder.embeddings3.weight.data[idx] = torch.tensor(wv).cuda()
-                    else:
-                        assert False
-            logger.info('Number of words found in monolingual corpus for emb%d: %d out of %d' % (emb_idx, o, len(source_word2idx)))
+                    cur = line.strip().split(' ')
+                    word = cur[0].lower()
+                    wv = list(map(float, cur[1::]))
+                    if word in source_word2idx:
+                        o += 1
+                        if 0 == wv[0] and 0 == wv[1] and 0 == wv[2] and 0 == wv[3]:
+                            continue
+                        idx = source_word2idx[word]
+                        if emb_idx == 1:
+                            model.encoder.embeddings1.weight.data[idx] = torch.tensor(wv).cuda()
+                        elif emb_idx == 2:
+                            model.encoder.embeddings2.weight.data[idx] = torch.tensor(wv).cuda()
+                        elif emb_idx == 3:
+                            model.encoder.embeddings3.weight.data[idx] = torch.tensor(wv).cuda()
+                        else:
+                            assert False
+                logger.info('Number of words found in monolingual corpus for emb%d: %d out of %d' % (emb_idx, o, len(source_word2idx)))
+    except AttributeError:
+        pass
 
         # Uncomment below lines to freeze embeddings. It's discouraged to freeze though.
         # logger.warn('Freezing embeddings')
@@ -161,8 +175,20 @@ def initialize_model_parameters(model, source_word2idx):
 
 
 def buildModel(args, train_iterator):
+    __model = None
+    if args.model_type == 'seq2seq_baseline':
+        __model = seq2seq_attn_baseline
+    elif args.model_type == 'seq2seq_baseline_word_attn':
+        __model = seq2seq_attn_baseline_word_attn
+    elif args.model_type == 'seq2seq_multivec':
+        __model = seq2seq_attn_multivec
+    elif args.model_type == 'seq2seq_multivec_word_attn':
+        __model = seq2seq_attn_multivec_word_attn
+    else:
+        assert False
+    assert __model is not None
     logger.info('Building Encoder')
-    encoder = seq2seq_attn_multivec.encoder(
+    encoder = __model.encoder(
         'LSTM',
         bidirectional=args.bidirectional,
         num_layers=args.encoder_num_layers,
@@ -174,7 +200,7 @@ def buildModel(args, train_iterator):
     ).cuda()
 
     logger.info('Building Decoder')
-    decoder = seq2seq_attn_multivec.decoder(
+    decoder = __model.decoder(
         'LSTM',
         bidirectional_encoder=args.bidirectional,
         num_layers=args.decoder_num_layers,
@@ -187,10 +213,10 @@ def buildModel(args, train_iterator):
     ).cuda()
 
     logger.info('Building Model')
-    model = seq2seq_attn_multivec.Seq2SeqAttention(encoder, decoder).cuda()
+    model = __model.Seq2SeqAttention(encoder, decoder).cuda()
 
     logger.info('Initializing Model Parameters')
-    initialize_model_parameters(model, train_iterator.sourceField.word2idx)
+    initialize_model_parameters(args.adagram_embeddings_dir, model, train_iterator.sourceField.word2idx)
     logger.info(model)
     return model
 
@@ -208,7 +234,8 @@ def getOptimizer(args):
         args.start_decay_at,
         args.decay_lrate_steps,
         args.adam_beta1,
-        args.adam_beta2
+        args.adam_beta2,
+        args.patience_steps
     )
 
     optimizer.set_parameters(args.model.parameters())
@@ -241,7 +268,7 @@ def display_time(seconds, granularity=2):
             seconds -= value * count
             if value == 1:
                 name = name.rstrip('s')
-            result.append("{}{}".format(value, name))
+            result.append("{}{}".format(int(value), name))
     return ', '.join(result[:granularity])
 
 def train(args):
@@ -249,12 +276,15 @@ def train(args):
     trainer = Trainer.Trainer(args)
     best_loss = 1e9
     best_accuracy = -1
+    best_loss_real = 1e9
+    best_accuracy_real = -1
     start_time = time.time()
-    for steps in range(args.steps):
+    logger.info('Training with validation_steps: %d, patience: %d, model: %s' % (args.valid_steps, args.patience_steps, args.model_type))
+    try:
+      for steps in range(args.steps):
         batch = args.iterators.train_iterator.next_batch(args.batch_size)
         batch.transpose()
         stats = trainer.propagate(batch, steps)
-        trainer.lr_step(stats._loss(), steps)
         end_time = time.time()
         elapsed = end_time - start_time
         remaining_time = ((args.steps * elapsed) / float(steps + 1)) - elapsed
@@ -265,28 +295,81 @@ def train(args):
 
             experiment.log_metric('Training Loss', stats._loss(), step=steps)
             experiment.log_metric('Training Accuracy', stats.accuracy(), step=steps)
-            torch.save(args.model.state_dict(), args.save_to)
 
-        if steps >= 250 and steps % 250 == 0:
+        if steps >= args.valid_steps and steps % args.valid_steps == 0:
             args.iterators.valid_iterator.reset()
-            valid_stats = trainer.validate(args.iterators.valid_iterator, b_size=20)
-            logger.info('\n' + '=' * 20 + '\nStep: %d, valid_loss: %.6f, valid_accuracy: %.6f, LR: %.6f\n' % (
-            steps, valid_stats._loss(), valid_stats.accuracy(), args.optimizer.lrate) + '=' * 20)
+            valid_stats = trainer.validate(args.iterators.valid_iterator, b_size=10)
+
+            args.iterators.valid_iterator.reset()
+            valid_stats1 = trainer.validate_fixed(args.iterators.valid_iterator, b_size=10)
+
+            trainer.lr_step(valid_stats._loss(), steps)
+            logger.info('\n' + '=' * 20 + '\nStep: %d, valid_loss: %.6f | %.6f, valid_accuracy: %.6f | %.6f, LR: %.6f, patience: %d\n' % (
+            steps, valid_stats._loss(), valid_stats1._loss(), valid_stats.accuracy(), valid_stats1.accuracy(), args.optimizer.lrate, args.optimizer.patience) + '=' * 20)
+
             cur_loss = valid_stats._loss()
             cur_acc = valid_stats.accuracy()
+
+            cur_loss_real = valid_stats1._loss()
+            cur_acc_real = valid_stats1.accuracy()
             # neptune.log_metric('Validation Loss', valid_stats._loss())
             # neptune.log_metric('Validation Accuracy', valid_stats.accuracy())
 
             experiment.log_metric('Validation Loss', valid_stats._loss(), step=steps)
             experiment.log_metric('Validation Accuracy', valid_stats.accuracy(), step=steps)
+
+            experiment.log_metric('Validation Loss_real', valid_stats1._loss(), step=steps)
+            experiment.log_metric('Validation Accuracy_real', valid_stats1.accuracy(), step=steps)
             if best_loss > cur_loss or best_accuracy < cur_acc:
-                logger.info('Saving model')
+                logger.info('Saving model to %s' % args.save_to)
                 torch.save(args.model.state_dict(), args.save_to)
+
+            if best_loss_real > cur_loss_real or best_accuracy_real < cur_acc_real:
+                logger.info('Saving model to ./data/model_real.pt')
+                torch.save(args.model.state_dict(), './data/model_real.pt')
+
             best_loss = min(best_loss, cur_loss)
             best_accuracy = max(best_accuracy, cur_acc)
 
+            best_loss_real = min(best_loss_real, cur_loss_real)
+            best_accuracy_real = max(best_accuracy_real, cur_acc_real)
+
+        if steps >= 500 and steps % 500 == 0:
+            logger.info('Sleeping for 2 minutes')
+            time.sleep(120)
+        if args.optimizer.lrate <= 1e-7:
+            break
+    except KeyboardInterrupt:
+      pass
+
+    # Loading the best parameters
+    args.model.load_state_dict(torch.load('./data/model.pt'))
+    args.model.eval()
+
+    args.iterators.valid_iterator.reset()
+    valid_stats = trainer.validate(args.iterators.valid_iterator, b_size=10)
+
+    args.iterators.valid_iterator.reset()
+    valid_stats1 = trainer.validate_fixed(args.iterators.valid_iterator, b_size=10)
+
+    logger.info(
+        '\n' + '=' * 20 + '\n[BEST] valid_loss: %.6f | %.6f, valid_accuracy: %.6f | %.6f, LR: %.6f, patience: %d\n' % (
+            valid_stats._loss(), valid_stats1._loss(), valid_stats.accuracy(), valid_stats1.accuracy(),
+            args.optimizer.lrate, args.optimizer.patience) + '=' * 20)
+
+    args.iterators.test_iterator.reset()
+    test_stats = trainer.validate(args.iterators.test_iterator, b_size=10)
+
+    args.iterators.test_iterator.reset()
+    test_stats1 = trainer.validate_fixed(args.iterators.test_iterator, b_size=10)
+    logger.info(
+        '\n' + '#' * 70 + '\n[BEST] test_loss: %.6f | %.6f, test_accuracy: %.6f | %.6f\n' % (
+            test_stats._loss(), test_stats1._loss(), test_stats.accuracy(), test_stats1.accuracy()))
+
+
+
 def translate(args, iterators):
-    args.model.load_state_dict(torch.load('/home/chaitanya/PycharmProjects/venv/.guild/runs/55ea009d2bc84dc18706c99d8027a20e/data/model.pt'))
+    # args.model.load_state_dict(torch.load('/home/chaitanya/PycharmProjects/venv/.guild/runs/55ea009d2bc84dc18706c99d8027a20e/data/model.pt'))
     args.model.eval()
 
     scorer = Beam.GNMTGlobalScorer(0.0, 0.0)
@@ -304,6 +387,7 @@ def translate(args, iterators):
                                        beam_trace=False,
                                        min_length=0)
 
+    iterators.test_iterator.reset()
     builder = Translator.TranslationBuilder(iterators.train_iterator.sourceField, iterators.train_iterator.targetField,
                                             iterators.test_iterator,
                                             1, True)
@@ -312,7 +396,8 @@ def translate(args, iterators):
     cur_batch = 0
 
     f = open('./data/predicted.txt', 'w')
-
+    translations_with_attn = []
+    assert iterators.test_iterator.nSentencesPruned == iterators.test_iterator.nSentences
     while cur_batch < iterators.test_iterator.nSentences:
         batch = iterators.test_iterator.next_batch(
             1)  # , args.maxlen, source_language_model = source_data, target_language_model = target_data)
@@ -324,21 +409,36 @@ def translate(args, iterators):
             pred_score_total += trans.pred_scores[0]
             pred_words_total += len(trans.pred_sents[0])
             n_best_preds = [' '.join(pred) for pred in trans.pred_sents[: 1]]
+            # translations_with_attn.append(
+            #     {
+            #         'attentions':trans.attns[0].data.cpu().numpy().tolist(),
+            #         'source sentence': batch.src_raw,
+            #         'translation': ' '.join(n_best_preds),
+            #         'src': batch.src.data.cpu().numpy().tolist(),
+            #     }
+            # )
             f.write('\n'.join(n_best_preds))
             f.write('\n')
             f.flush()
         cur_batch += batch.batch_size
         sys.stdout.write('%d/%d       \r' % (cur_batch, iterators.test_iterator.nSentences))
         sys.stdout.flush()
+        with open('./data/predictions_with_attention_wts.txt', 'w') as fp:
+            json.dump(translations_with_attn, fp)
 
     f.close()
 
 if __name__ == '__main__':
     # neptune.init('achaitanyasai/Machine-Translation-Test', api_token='eyJhcGlfYWRkcmVzcyI6Imh0dHBzOi8vdWkubmVwdHVuZS5tbCIsImFwaV9rZXkiOiIxMmU4NTM4Yy04OGVkLTQxZjktOTAzNy0wMWJlNTkwZGU4MWQifQ==')
 
+    args = parse_arguments()
+    disabled = False
+    if args.expt_name == 'test':
+        disabled = True
+
     experiment = Experiment(api_key="G1Hu2kJ89qGE5sZ1cBNlrq6Hj",
-                            project_name="test-baseline", workspace="achaitanyasai",
-                            disabled=False)
+                            project_name="english-hindi", workspace="achaitanyasai",
+                            disabled=disabled)
 
     # experiment.log_asset(file_data='./models/seq2seq_attn.py', file_name='seq2seq_attn.py', overwrite=False)
     # experiment.log_asset(file_data='./modules/Trainer.py', file_name='trainer.py', overwrite=False)
@@ -346,17 +446,23 @@ if __name__ == '__main__':
     # experiment.add_tag('Expt-8')
     # experiment.add_tag('vector_space=2')
     # experiment.add_tag('UNK percentage=5')
+
     experiment.add_tag('Bidirectional')
     experiment.add_tag('init: uniform')
-    experiment.add_tag('attn: bahdanau-additive')
-    experiment.add_tag('Word level attn + dropout 0.4')
+    experiment.add_tag('%s' % args.model_type)
+    experiment.add_tag('patience-5')
+    experiment.set_name("%s" % args.expt_name)
+    #experiment.add_tag('attn: bahdanau-additive')
+    #experiment.add_tag('re-train with much better adagram vectors')
+    #experiment.add_tag('Word level attn + word penalty')
+    # experiment.add_tag('TEST')
 
     # Adding the Run parameters
     run_id = os.environ.get('RUN_ID')
     run_dir = os.environ.get('RUN_DIR')
     logger.info('Run Id: %s' % (run_id))
     logger.info('Run Dir: %s' % (run_dir))
-    args = parse_arguments()
+
     args.run_id = run_id
     args.run_dir = run_dir
 
@@ -381,11 +487,12 @@ if __name__ == '__main__':
     optimizer = getOptimizer(args)
     args.optimizer = optimizer
 
-    # train(args)
+    train(args)
 
+    args.iterators.test_iterator.reset()
     translate(args, iterators)
 
-    s = os.popen('perl %s/.guild/sourcecode/scripts/bleu-1.04.pl /tmp/a.txt < ./data/predicted.txt' % run_dir).read().strip()
+    s = os.popen('perl %s/.guild/sourcecode/scripts/bleu-1.04.pl %s < ./data/predicted.txt' % (run_dir, args.testset_target)).read().strip()
 
     bleu = 0.0
     try:
@@ -394,12 +501,13 @@ if __name__ == '__main__':
         pass
 
     logger.info('BLEU score: %.3f' % bleu)
+    logger.info('#' * 70)
 
     experiment.log_metric('Bleu score', bleu)
     experiment.log_asset('./data/training_logs.txt')
-    experiment.log_asset_folder('./models')
-    experiment.log_asset_folder('./modules')
+    experiment.log_asset_folder('%s/.guild/sourcecode/models' % (run_dir))
+    experiment.log_asset_folder('%s/.guild/sourcecode/modules' % (run_dir))
 
     # Please explicitly delete the objects in which you have __del__ method implemented.
     del args
-    del iterators
+    iterators.__del__()

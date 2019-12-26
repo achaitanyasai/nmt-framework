@@ -129,7 +129,7 @@ class encoder(nn.Module):
         if lengths is not None:
             outputs = unpack(outputs)[0]
 
-        return hidden_t, outputs, None
+        return hidden_t, outputs, None, None
 
 class decoderBase(nn.Module):
     '''
@@ -203,9 +203,9 @@ class decoderBase(nn.Module):
         input,
         input_charngrams,
         context,
+        encoder_embedding,
         state,
         context_lengths):
-
         assert isinstance(state, RNNDecoderState)
         input_len, input_batch = input.size()
         context_len, context_batch, _ = context.size()
@@ -276,7 +276,7 @@ class decoder(decoderBase):
         
         hidden = state.hidden
         coverage = state.coverage.squeeze(0) if state.coverage is not None else None
-        
+
         for i, emb_t in enumerate(emb.split(1)):
             emb_t = emb_t.squeeze(0)
             emb_t = torch.cat([emb_t, output], 1) #Input feed
@@ -296,11 +296,11 @@ class decoder(decoderBase):
                 coverage = coverage + attn \
                     if coverage is not None else attn
                 attns['coverage'] += [coverage]
-            
+
             if self._copy:
                 _, copy_attn = self.copy_attn(output, context.transpose(0, 1))
                 attns['copy'] += [copy_attn]
-        
+
         return hidden, outputs, attns, coverage
 
     def _build_rnn(
@@ -331,12 +331,12 @@ class Seq2SeqAttention(nn.Module):
         tgt = batch.tgt
         tgt = tgt[:-1]
 
-        enc_hidden, context, penalty = self.encoder(src, None, src_lens)
+        enc_hidden, context, penalty, _ = self.encoder(src, None, src_lens)
         encoderOutputs = EncoderOutputs(enc_hidden, context)
 
         enc_state = self.decoder.init_decoder_state(src, context, enc_hidden)
 
-        out, dec_state, attns, predictions = self.decoder(tgt, None, encoderOutputs.outputs, enc_state, context_lengths=src_lens)
+        out, dec_state, attns, predictions = self.decoder(tgt, None, encoderOutputs.outputs, None, enc_state, context_lengths=src_lens)
         decoderOutputs = DecoderOutputs(predictions, None, out, dec_state)
 
         return decoderOutputs

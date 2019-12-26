@@ -10,7 +10,7 @@ https://github.com/OpenNMT/OpenNMT-py/blob/master/onmt/Optim.py
 class Optimizer(object):
     def __init__(self, optimizer_type, lrate, max_grad_norm,
                  lrate_decay=1, start_decay_at=None,
-                 decay_lrate_steps=50, beta1=0.9, beta2=0.999):
+                 decay_lrate_steps=50, beta1=0.9, beta2=0.999, patience_steps=-1):
         self.optimizer_type = optimizer_type
         self.lrate = lrate
         self.original_lrate = lrate
@@ -21,8 +21,14 @@ class Optimizer(object):
         self.decay_lrate_steps = decay_lrate_steps
         self._step = 0
         self.betas = (beta1, beta2)
+        if optimizer_type == 'adam' and (beta1 == 0 or beta2 == 0):
+            raise Exception('betas are zeros. Please check again')
         self.last_decayed = 0
         self.last_loss = 1000000000000000.0
+        self.patience = 0
+        self.best_loss = 1e9
+        self.patience_steps = patience_steps
+        assert patience_steps > 0
 
     def set_parameters(self, params):
         self.params = [p for p in params if p.requires_grad]
@@ -63,11 +69,23 @@ class Optimizer(object):
         Decay learning rate if val perf does not improve
         or we hit the start_decay_at limit.
         """
-        if step >= self.start_decay_at:
-            if step - self.last_decayed >= self.decay_lrate_steps:
-                self.last_decayed = step
-                self.lrate = self.lrate * self.lrate_decay
-                self.optimizer.param_groups[0]['lr'] = self.lrate
+        if cur_loss < self.best_loss:
+            self.best_loss = cur_loss
+            self.patience = 0
+        else:
+            self.patience += 1
+
+        if self.patience >= self.patience_steps:
+            logger.info('Decaying learning rate. Please verify the decaying method')
+            self.lrate = self.lrate * self.lrate_decay
+            self.patience = 0
+            self.optimizer.param_groups[0]['lr'] = self.lrate
+
+        # if step >= self.start_decay_at:
+        #     if step - self.last_decayed >= self.decay_lrate_steps:
+        #         self.last_decayed = step
+        #         self.lrate = self.lrate * self.lrate_decay
+        #         self.optimizer.param_groups[0]['lr'] = self.lrate
 
         # if cur_loss > self.last_loss and step >= self.start_decay_at:
         #     self.start_decay = True

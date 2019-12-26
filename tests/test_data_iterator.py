@@ -4,7 +4,7 @@
 '''
 tests for data_iterator.py
 '''
-
+import os
 import random
 random.seed(8595)
 import torch
@@ -93,6 +93,68 @@ class testField(unittest.TestCase):
             _, _ = f.sentence2indices(('asdf', 'qwer'))
         _, _ = f.sentence2indices([])
 
+class testDataIteratorReproducability(unittest.TestCase):
+
+    def setUp(self):
+        pass
+
+    def test_reset(self):
+        iterator = data_iterator.DataIterator(fields=None, fname='./tests/toy_copy/train.csv', shuffle=True,
+                                              data_type='train',
+                                              src_max_len=100, tgt_max_len=100, src_max_vocab_size=100,
+                                              tgt_max_vocab_size=100, ignore_too_many_unknowns=True, cleanup=True)
+
+        iterator1 = data_iterator.DataIterator(fields=None, fname='./tests/toy_copy/train.csv', shuffle=True,
+                                              data_type='train',
+                                              src_max_len=100, tgt_max_len=100, src_max_vocab_size=100,
+                                              tgt_max_vocab_size=100, ignore_too_many_unknowns=True, cleanup=True)
+
+        for i in range(5):
+            z = open(iterator.preprocessedfname).read()
+
+            iterator.reset()
+            iterator1.reset()
+
+            x = open(iterator.preprocessedfname).read()
+            y = open(iterator1.preprocessedfname).read()
+
+            self.assertEqual(x, y)
+            self.assertNotEqual(x, z)
+
+        del iterator1
+        del iterator
+
+    def test_reset_length_pruning(self):
+        iterator = data_iterator.DataIterator(fields=None, fname='./tests/toy_very_small/data.csv', shuffle=True,
+                                              data_type='train',
+                                              src_max_len=1, tgt_max_len=1, src_max_vocab_size=100,
+                                              tgt_max_vocab_size=100, ignore_too_many_unknowns=True, cleanup=True)
+
+        x = open(iterator.preprocessedfname).read()
+        y = 'okrst,okrst\n22,17\n'
+        self.assertEqual(''.join(sorted(x)), ''.join(sorted(y)))
+
+        iterator1 = data_iterator.DataIterator(fields=(iterator.sourceField, iterator.targetField), fname='./tests/toy_very_small/data_test.csv', shuffle=False,
+                                              data_type='test',
+                                              src_max_len=None, tgt_max_len=None, src_max_vocab_size=None,
+                                              tgt_max_vocab_size=None, ignore_too_many_unknowns=True, cleanup=True)
+
+        x = open(iterator1.preprocessedfname).read()
+        y = 'hello world,\nokrst,\n22,\nasdf 22,\nnot seen,\n22 ghsfghda,\n'
+        self.assertEqual(''.join(sorted(x)), ''.join(sorted(y)))
+
+        del iterator
+        del iterator1
+
+    def test_asserts(self):
+        iterator = data_iterator.DataIterator(fields=None, fname='./tests/toy_very_small/data.csv', shuffle=True,
+                                              data_type='train',
+                                              src_max_len=1, tgt_max_len=1, src_max_vocab_size=100,
+                                              tgt_max_vocab_size=100, ignore_too_many_unknowns=True, cleanup=False)
+        with self.assertRaises(AssertionError) as context:
+            iterator.__del__()
+        os.remove(iterator.preprocessedfname)
+
 class testDataIterator(unittest.TestCase):
 
     def setUp(self):
@@ -108,31 +170,42 @@ class testDataIterator(unittest.TestCase):
 
         iterator = data_iterator.DataIterator(fields=None, fname='./tests/toy_very_small/data.csv', shuffle=True, data_type='train',
                  src_max_len=100, tgt_max_len=100, src_max_vocab_size=100,
-                 tgt_max_vocab_size=100, ignore_too_many_unknowns=True, cleanup=False)
+                 tgt_max_vocab_size=100, ignore_too_many_unknowns=True, cleanup=True)
 
         self.assertEqual(iterator.nSentences, 4)
-        f = open('./tests/toy_very_small/data.csv.tmp')
+        f = open(iterator.preprocessedfname)
         x = f.read()
         f.close()
-        self.assertEqual(x, 'hello world,hello world\nokrst,okrst\nasdf 22,17 qwe\n22,17\n')
+        f = open('./tests/toy_very_small/data.csv')
+        y = f.read()
+        f.close()
+        self.assertNotEqual(x, y)
+        self.assertEqual(''.join(sorted(x)), ''.join(sorted(y)))
+        # self.assertEqual(x, 'hello world,hello world\nokrst,okrst\nasdf 22,17 qwe\n22,17\n')
         iterator.reset()
         iterator.reset()
-        f = open('./tests/toy_very_small/data.csv.tmp')
+        iterator.reset()
+        iterator.reset()
+        f = open(iterator.preprocessedfname)
         x = f.read()
         f.close()
-        self.assertEqual(x, 'asdf 22,17 qwe\nhello world,hello world\nokrst,okrst\n22,17\n')
+        # self.assertEqual(x, 'asdf 22,17 qwe\nhello world,hello world\nokrst,okrst\n22,17\n')
+        self.assertNotEqual(x, y)
+        self.assertEqual(''.join(sorted(x)), ''.join(sorted(y)))
+        iterator.__del__()
 
         iterator = data_iterator.DataIterator(fields=None, fname='./tests/toy_very_small/data.csv', shuffle=False,
                                               data_type='train',
                                               src_max_len=100, tgt_max_len=100, src_max_vocab_size=100,
                                               tgt_max_vocab_size=100, ignore_too_many_unknowns=True,
-                                              cleanup=False)
+                                              cleanup=True)
 
         self.assertEqual(iterator.nSentences, 4)
-        f = open('./tests/toy_very_small/data.csv.tmp')
+        f = open(iterator.preprocessedfname)
         x = f.read()
         f.close()
-        self.assertEqual(x, 'hello world,hello world\nokrst,okrst\n22,17\nasdf 22,17 qwe\n')
+        self.assertEqual(''.join(sorted(x)), ''.join(sorted('hello world,hello world\nokrst,okrst\n22,17\nasdf 22,17 qwe\n')))
+        iterator.__del__()
 
     def test_length_pruning(self):
         iterator = data_iterator.DataIterator(fields=None, fname='./tests/toy_very_small/data.csv', shuffle=True,
@@ -142,14 +215,29 @@ class testDataIterator(unittest.TestCase):
 
         self.assertEqual(iterator.nSentences, 4)
         self.assertEqual(iterator.nSentencesPruned, 2)
-        f = open('./tests/toy_very_small/data.csv.tmp')
+        f = open(iterator.preprocessedfname)
         x = f.read()
         f.close()
-        self.assertEqual(x, '22,17\nokrst,okrst\n')
-        a = []
+        y = '22,17\nokrst,okrst\n'
+        self.assertEqual(''.join(sorted(x)), ''.join(sorted(y)))
+        # self.assertEqual(x, '22,17\nokrst,okrst\n')
+        a = [
+            ('22', '17'),
+            ('okrst', 'okrst')
+        ]
+        b = [0, 1]
         for i in iterator.next:
-            a.append(i)
-        self.assertEqual(a, [('22', '17', 0), ('okrst', 'okrst', 1)])
+            j = (i[0], i[1])
+            k = i[2]
+
+            idx = a.index(j)
+            a.pop(idx)
+            idx = b.index(k)
+            b.pop(idx)
+
+        self.assertEqual(a, [])
+        self.assertEqual(b, [])
+        iterator.__del__()
 
     def test_testset_iteration(self):
         with self.assertRaises(AssertionError) as _:
@@ -157,6 +245,7 @@ class testDataIterator(unittest.TestCase):
                                                   data_type='test',
                                                   src_max_len=2, tgt_max_len=2, src_max_vocab_size=100,
                                                   tgt_max_vocab_size=100, ignore_too_many_unknowns=True)
+            iterator.__del__()
 
         train_iterator = data_iterator.DataIterator(fields=None, fname='./tests/toy_very_small/data.csv', shuffle=True,
                                               data_type='train',
@@ -170,10 +259,13 @@ class testDataIterator(unittest.TestCase):
 
         self.assertEqual(iterator.nSentences, 6)
         self.assertEqual(iterator.nSentencesPruned, 6)
-        f = open('./tests/toy_very_small/data_test.csv.tmp')
+        f = open(iterator.preprocessedfname)
         x = f.read()
         f.close()
-        self.assertEqual(x, 'hello world,\nokrst,\n22,\nasdf 22,\nnot seen,\n22 ghsfghda,')
+
+        y = 'hello world,\nokrst,\n22,\nasdf 22,\nnot seen,\n22 ghsfghda,\n'
+
+        self.assertEqual(''.join(sorted(x)), ''.join(sorted(y)))
         a = []
         c = []
         for i in iterator.next:
@@ -197,60 +289,113 @@ class testDataIterator(unittest.TestCase):
         ]
         self.assertEqual(a, b)
         self.assertEqual(c, d)
+        iterator.__del__()
+        train_iterator.__del__()
 
     def test_next_batch(self):
         train_iterator = data_iterator.DataIterator(fields=None, fname='./tests/toy_very_small/data.csv', shuffle=True,
                                               data_type='train',
                                               src_max_len=100, tgt_max_len=100, src_max_vocab_size=100,
                                               tgt_max_vocab_size=100, ignore_too_many_unknowns=True)
-        a = train_iterator.next_batch(1)
-        self.assertTrue(torch.eq(a.src, torch.tensor([[5]]).cuda()))
-        self.assertEqual(a.src_raw, [['22']])
-        self.assertTrue(torch.all(torch.eq(a.tgt, torch.tensor([[2, 7, 3]]).cuda())))
-        self.assertEqual(a.tgt_raw, [['17']])
-        # =========================================
-        a = train_iterator.next_batch(1)
-        self.assertTrue(torch.all(torch.eq(a.src, torch.tensor([[2, 3]]).cuda())))
-        self.assertEqual(a.src_raw, [['hello', 'world']])
-        self.assertTrue(torch.all(torch.eq(a.tgt, torch.tensor([[2, 4, 5, 3]]).cuda())))
-        self.assertEqual(a.tgt_raw, [['hello', 'world']])
-        # =========================================
-        a = train_iterator.next_batch(1)
-        self.assertTrue(torch.all(torch.eq(a.src, torch.tensor([[4]]).cuda())))
-        self.assertEqual(a.src_raw, [['okrst']])
-        self.assertTrue(torch.all(torch.eq(a.tgt, torch.tensor([[2, 6, 3]]).cuda())))
-        self.assertEqual(a.tgt_raw, [['okrst']])
-        # =========================================
-        a = train_iterator.next_batch(1)
-        self.assertTrue(torch.all(torch.eq(a.src, torch.tensor([[6, 5]]).cuda())))
-        self.assertEqual(a.src_raw, [['asdf', '22']])
-        self.assertTrue(torch.all(torch.eq(a.tgt, torch.tensor([[2, 7, 8, 3]]).cuda())))
-        self.assertEqual(a.tgt_raw, [['17', 'qwe']])
-        # =========================================
+        all_samples_src_raw = [
+            [['22']],
+            [['hello', 'world']],
+            [['okrst']],
+            [['asdf', '22']]
+        ]
+
+        all_samples_src = [
+            torch.tensor([[5]]).cuda(),
+            torch.tensor([[2, 3]]).cuda(),
+            torch.tensor([[4]]).cuda(),
+            torch.tensor([[6, 5]]).cuda()
+        ]
+
+        all_samples_tgt_raw = [
+            [['17']],
+            [['hello', 'world']],
+            [['okrst']],
+            [['17', 'qwe']]
+        ]
+
+        all_samples_tgt = [
+            torch.tensor([[2, 7, 3]]).cuda(),
+            torch.tensor([[2, 4, 5, 3]]).cuda(),
+            torch.tensor([[2, 6, 3]]).cuda(),
+            torch.tensor([[2, 7, 8, 3]]).cuda()
+        ]
+
+        for i in range(4):
+            a = train_iterator.next_batch(1)
+            src_raw = a.src_raw
+            idx = all_samples_src_raw.index(src_raw)
+            self.assertTrue(torch.all(torch.eq(a.src, all_samples_src[idx])))
+            self.assertTrue(torch.all(torch.eq(a.tgt, all_samples_tgt[idx])))
+            self.assertEqual(a.tgt_raw, all_samples_tgt_raw[idx])
+
+            all_samples_src_raw.pop(idx)
+            all_samples_src.pop(idx)
+            all_samples_tgt.pop(idx)
+            all_samples_tgt_raw.pop(idx)
+
         a = train_iterator.next_batch(1)
         self.assertEqual(a, None)
+        self.assertEqual(all_samples_src, [])
+        self.assertEqual(all_samples_src_raw, [])
+        self.assertEqual(all_samples_tgt, [])
+        self.assertEqual(all_samples_tgt_raw, [])
         # =========================================
+        train_iterator.__del__()
 
     def test_next_batch_pruned(self):
         train_iterator = data_iterator.DataIterator(fields=None, fname='./tests/toy_very_small/data.csv', shuffle=True,
                                               data_type='train',
                                               src_max_len=1, tgt_max_len=1, src_max_vocab_size=100,
                                               tgt_max_vocab_size=100, ignore_too_many_unknowns=True)
+
+        all_samples_src_raw = [
+            [['22']],
+            [['okrst']],
+        ]
+
+        all_samples_src = [
+            torch.tensor([[3]]).cuda(),
+            torch.tensor([[2]]).cuda(),
+        ]
+
+        all_samples_tgt_raw = [
+            [['17']],
+            [['okrst']],
+        ]
+
+        all_samples_tgt = [
+            torch.tensor([[2, 5, 3]]).cuda(),
+            torch.tensor([[2, 4, 3]]).cuda(),
+        ]
+
+        for i in range(2):
+            a = train_iterator.next_batch(1)
+            src_raw = a.src_raw
+            idx = all_samples_src_raw.index(src_raw)
+            print(a.src)
+            print(all_samples_src[idx])
+            self.assertTrue(torch.all(torch.eq(a.src, all_samples_src[idx])))
+            self.assertTrue(torch.all(torch.eq(a.tgt, all_samples_tgt[idx])))
+            self.assertEqual(a.tgt_raw, all_samples_tgt_raw[idx])
+
+            all_samples_src_raw.pop(idx)
+            all_samples_src.pop(idx)
+            all_samples_tgt.pop(idx)
+            all_samples_tgt_raw.pop(idx)
+
         a = train_iterator.next_batch(1)
-        self.assertTrue(torch.eq(a.src, torch.tensor([[3]]).cuda()))
-        self.assertEqual(a.src_raw, [['22']])
-        self.assertTrue(torch.all(torch.eq(a.tgt, torch.tensor([[2, 5, 3]]).cuda())))
-        self.assertEqual(a.tgt_raw, [['17']])
-        # =========================================
-        a = train_iterator.next_batch(1)
-        self.assertTrue(torch.all(torch.eq(a.src, torch.tensor([[2]]).cuda())))
-        self.assertEqual(a.src_raw, [['okrst']])
-        self.assertTrue(torch.all(torch.eq(a.tgt, torch.tensor([[2, 4, 3]]).cuda())))
-        self.assertEqual(a.tgt_raw, [['okrst']])
-        # =========================================
-        a = train_iterator.next_batch(1)
+        self.assertEqual(all_samples_src, [])
+        self.assertEqual(all_samples_tgt_raw, [])
+        self.assertEqual(all_samples_tgt, [])
+        self.assertEqual(all_samples_src_raw, [])
         self.assertEqual(a, None)
         # =========================================
+        train_iterator.__del__()
 
     def test_next_batch_multiple_samples(self):
         train_iterator = data_iterator.DataIterator(fields=None, fname='./tests/toy_copy/train.csv', shuffle=False,
@@ -297,6 +442,7 @@ class testDataIterator(unittest.TestCase):
             self.assertEqual(j, train_iterator.targetField.vec2sentence(i))
             self.assertEqual(k, l.split())
             self.assertEqual(len(i), 20)
+        train_iterator.__del__()
 
     def test_next_batch_testset(self):
         train_iterator = data_iterator.DataIterator(fields=None, fname='./tests/toy_copy/train.csv', shuffle=False,
@@ -323,6 +469,9 @@ class testDataIterator(unittest.TestCase):
             self.assertEqual(j, train_iterator.sourceField.vec2sentence(i).split())
             self.assertEqual(k, l)
             self.assertEqual(len(i), 18)
+
+        train_iterator.__del__()
+        valid_iterator.__del__()
 #        Not required to test the tgt.
 
 
@@ -364,6 +513,7 @@ class testDataIterator1(unittest.TestCase):
             self.assertTrue(torch.all(torch.eq(a.tgt, torch.tensor([[2, 7, 8, 3]]).cuda())))
             self.assertEqual(a.tgt_raw, [['17', 'qwe']])
             # =========================================
+        train_iterator.__del__()
 
     def test_break_on_stop_iteration_shuffle(self):
         train_iterator = data_iterator.DataIterator(fields=None, fname='./tests/toy_very_small/data.csv', shuffle=True,
@@ -394,6 +544,8 @@ class testDataIterator1(unittest.TestCase):
         X.sort()
         Y.sort()
         self.assertEqual(X, Y)
+
+        train_iterator.__del__()
 
 if __name__ == '__main__':
    unittest.main()

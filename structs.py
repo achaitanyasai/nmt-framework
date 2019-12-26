@@ -28,9 +28,9 @@ class TrainValidTestIterator(object):
         self.test_iterator = test_iterator
 
     def __del__(self):
-        del self.train_iterator
-        del self.valid_iterator
-        del self.test_iterator
+        self.train_iterator.__del__()
+        self.valid_iterator.__del__()
+        self.test_iterator.__del__()
 
 class EncoderOutputs(object):
     def __init__(self, hidden_t, outputs, encoder_embeddings=None):
@@ -48,11 +48,12 @@ class EncoderOutputs(object):
 
 
 class DecoderOutputs(object):
-    def __init__(self, predictions, penalty=None, hidden=None, dec_state=None):
+    def __init__(self, predictions, penalty=None, hidden=None, dec_state=None, attns=None):
         self.predictions = predictions
         self.penalty = penalty
         self.hidden = hidden
         self.dec_state = dec_state
+        self.attns = attns
 
 class ModelOutputs(object):
     def __init__(self, predictions, penalty=None, dec_state=None):

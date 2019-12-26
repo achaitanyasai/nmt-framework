@@ -51,6 +51,7 @@ class NMTLoss(LossBase):
         lines_src = batch.src
         lines_trg = batch.tgt
         predictions = modelOutputs.predictions
+        penalty = modelOutputs.penalty
 
         if self.perform_dimension_checks:
             # logger.info('Performing dimension checks')
@@ -60,15 +61,19 @@ class NMTLoss(LossBase):
             assert predictions.shape[2] == self.targetVocabularyLen
             # logger.info('Dimension checks OK')
         else:
-            logger.warning('Run with perform_dimension_checks flag to be 100% sure')
+            # logger.warning('Run with perform_dimension_checks flag to be 100% sure')
+            pass
 
         # popping first token because of SOS
         lines_trg = lines_trg[1:]
 
         gtruth = lines_trg.contiguous().view(-1)
         predictions = predictions.contiguous().view(-1, self.targetVocabularyLen)
-        
-        loss = self.criterion(predictions, gtruth)
+
+        if penalty:
+            loss = self.criterion(predictions, gtruth) + 0.7 * penalty
+        else:
+            loss = self.criterion(predictions, gtruth)
 
         cur_n_sentences = lines_src.size(1)
         cur_n_correct, cur_n_words = utils.calculate_correct_predictions(predictions.data, gtruth.data, self.target_padding_idx)

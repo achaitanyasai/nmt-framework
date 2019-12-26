@@ -65,7 +65,10 @@ class Translator(object):
             src_lengths = torch.Tensor(batch_size).type_as(context.data).long().fill_(context.size(0))
                 
         context = utils.rvar(context.data, beam_size)
-        enc_rnn_input = utils.rvar(encoder_embeddings.data, beam_size)
+        if encoder_embeddings is not None:
+            enc_rnn_input = utils.rvar(encoder_embeddings.data, beam_size)
+        else:
+            enc_rnn_input = None
         context_lengths = src_lengths.repeat(beam_size)
         dec_states.repeat_beam_size_times(beam_size)
 
@@ -89,7 +92,7 @@ class Translator(object):
             dec_out = dec_out.squeeze(0)
 
             if not self.copy_attn:
-                out = self.model.decoder.decoder2vocab.forward(dec_out).data
+                out = self.model.decoder.decoder2vocab(dec_out).data
                 out = utils.unbottle(out, beam_size, batch_size)
             else:
                 #Unimplemented
@@ -145,9 +148,11 @@ class TranslationBuilder(object):
     def _build_target_tokens(self, src, src_raw, pred, attn):
         vocab = self.target_data.idx2word
         tokens = []
+        tokens_indices = []
         for tok in pred:
             try:
                 tokens.append(vocab[tok.item()])
+                tokens_indices.append(tok.item())
             except KeyError:
                 #Can be done better (??)
                 #Refer: https://github.com/OpenNMT/OpenNMT-py/blob/master/onmt/translate/Translation.py#L36
@@ -182,7 +187,7 @@ class TranslationBuilder(object):
         inds, perm = torch.sort(torch.tensor(batch.indices).cuda())
         src = src.data.index_select(1, perm)
         translations = []
-        
+
         for b in range(batch_size):
             src_raw = batch.src_raw[perm[b]]
             pred_sents = [self._build_target_tokens(src[:, b], src_raw, preds[b][n], attn[b][n]) for n in range(self.n_best)]
