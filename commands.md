@@ -1,7 +1,8 @@
-####Ada commanda:
+####Ada commands:
 - `squeue --user chaitanyasai.alaparthi`
-- `sbatch train.sh`
-- `sinteractive -c 10 -p long -A research -g 1`
+- `sbatch train.sh` to submit batch job
+- `sinteractive -c 10 -p long -A research -g 1` to run interactively
+- Add the following environment modules/job configs in train.sh while submitting with sbatch
 ```
 #!/bin/bash
 
@@ -12,10 +13,12 @@
 #SBATCH --time=4-00:00:00
 #SBATCH --mail-type=END
 module load cuda/10.0
-module load cudnn/7.6.4-cuda-10.0
+module load cudnn/7.6-cuda-10.0
+module load python/3.7.4
 
 source ../../venv/bin/activate
  ```
+- Visit hpc.iiit.ac.in/wiki/index.php/Ada_User_Guide for more information
 
 ####Unittests: 
 - `py.test -v --no-print-logs`
