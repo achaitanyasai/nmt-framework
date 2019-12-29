@@ -3,7 +3,6 @@
 '''
 Trains and validates the model.
 '''
-import logging
 import math
 import os
 import random

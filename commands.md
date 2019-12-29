@@ -1,8 +1,28 @@
+####Ada commanda:
+- `squeue --user chaitanyasai.alaparthi`
+- `sbatch train.sh`
+- `sinteractive -c 10 -p long -A research -g 1`
+```
+#!/bin/bash
+
+#SBATCH -A research
+#SBATCH -n 32
+#SBATCH --gres=gpu:4
+#SBATCH --mem-per-cpu=2048
+#SBATCH --time=4-00:00:00
+#SBATCH --mail-type=END
+module load cuda/10.0
+module load cudnn/7.6.4-cuda-10.0
+
+source ../../venv/bin/activate
+ ```
+
 ####Unittests: 
 - `py.test -v --no-print-logs`
+- `py.test -v --no-print-logs -x` to stop on first failure
 - `pytest -v --show-capture=no --cov-report html --cov=.` to run with coverage
 
-Few codes to look for:
+####Few codes to look for:
 - `~/Research/ShataAnuvadak/_pytorch/all_indian_languages/multivec-adagram/nmt-framework/nmt.py`
 - `/home/chaitanya/Research/ShataAnuvadak/_pytorch/all_indian_languages/data`
 

@@ -2,7 +2,6 @@
 Loss function(s)
 '''
 
-import logging
 import torch
 import torch.nn
 from torch.autograd import Variable

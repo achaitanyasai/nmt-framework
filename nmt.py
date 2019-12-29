@@ -8,7 +8,6 @@ import json
 
 from comet_ml import Experiment
 import argparse
-import logging
 import math
 import os
 import pickle
@@ -30,7 +29,6 @@ import util
 from models import seq2seq_attn, seq2seq_attn_baseline, seq2seq_attn_multivec, seq2seq_attn_baseline_word_attn, seq2seq_attn_multivec_word_attn
 from modules import Loss, Optimizer, Trainer, Beam, Translator
 import subprocess
-import logging.config
 import warnings
 import datetime
 # from structs import *
@@ -41,11 +39,11 @@ import neptune
 
 torch.backends.cudnn.deterministic = True
 
-random.seed(3435)
-np.random.seed(3435)
-torch.manual_seed(3435)
-torch.cuda.manual_seed_all(3435)
-torch.cuda.manual_seed(3435)
+random.seed(346)
+np.random.seed(346)
+torch.manual_seed(346)
+torch.cuda.manual_seed_all(346)
+torch.cuda.manual_seed(346)
 
 def parse_arguments():
     logger.info("Parsing arguments")
@@ -280,21 +278,31 @@ def train(args):
     best_accuracy_real = -1
     start_time = time.time()
     logger.info('Training with validation_steps: %d, patience: %d, model: %s' % (args.valid_steps, args.patience_steps, args.model_type))
+    processed_sentences = 0
+    sentences_start_time = time.time()
     try:
       for steps in range(args.steps):
         batch = args.iterators.train_iterator.next_batch(args.batch_size)
         batch.transpose()
+        processed_sentences += batch.batch_size
         stats = trainer.propagate(batch, steps)
+        # Previously, it's: trainer.lr_step(valid_stats._loss(), steps)
+        # trainer.lr_step(stats._loss(), steps)
         end_time = time.time()
         elapsed = end_time - start_time
         remaining_time = ((args.steps * elapsed) / float(steps + 1)) - elapsed
         if steps % 10 == 0:
-            logger.info('Step: %d, train_loss: %.6f, train_accuracy: %.6f, ETA: %s' % (steps, stats._loss(), stats.accuracy(), display_time(remaining_time, 5)))
+            speed = round(processed_sentences / (time.time() - sentences_start_time))
+            sentences_start_time = time.time()
+            processed_sentences = 0
+
+            logger.info('Step: %d, train_loss: %.6f, train_accuracy: %.6f, ETA: %s, Speed: %d sents/sec' % (steps, stats._loss(), stats.accuracy(), display_time(remaining_time, 5), speed))
             # neptune.log_metric('Training Loss', stats._loss())
             # neptune.log_metric('Training Accuracy', stats.accuracy())
 
             experiment.log_metric('Training Loss', stats._loss(), step=steps)
             experiment.log_metric('Training Accuracy', stats.accuracy(), step=steps)
+            torch.save(args.model.state_dict(), "./data/model_every_10steps.pt")
 
         if steps >= args.valid_steps and steps % args.valid_steps == 0:
             args.iterators.valid_iterator.reset()
@@ -487,23 +495,42 @@ if __name__ == '__main__':
     optimizer = getOptimizer(args)
     args.optimizer = optimizer
 
-    train(args)
+    if args.expt_name != 'test':
+        train(args)
 
-    args.iterators.test_iterator.reset()
-    translate(args, iterators)
+    saved_models = [
+        './data/model_every_10steps.pt',
+        './data/model_real.pt',
+        './data/model.pt'
+    ]
+    max_bleu = 0
+    for model_file in saved_models:
+        args.model.load_state_dict(torch.load(model_file))
+        args.model.eval()
 
-    s = os.popen('perl %s/.guild/sourcecode/scripts/bleu-1.04.pl %s < ./data/predicted.txt' % (run_dir, args.testset_target)).read().strip()
+        args.iterators.test_iterator.reset()
+        translate(args, iterators)
 
-    bleu = 0.0
-    try:
-        bleu = float(s.split(',')[0].replace('BLEU = ', ''))
-    except Exception:
-        pass
+        s = os.popen('perl %s/.guild/sourcecode/scripts/bleu-1.04.pl %s < ./data/predicted.txt' % (run_dir, args.testset_target)).read().strip()
 
-    logger.info('BLEU score: %.3f' % bleu)
+        x = args.testset_target.strip('/')
+        x = x.split('/')[-1]
+        y = model_file.split('/')[-1]
+        f = open('./data/bleu_%s_%s.txt' % (x, y), 'w')
+        f.write(s)
+        f.close()
+
+        bleu = 0.0
+        try:
+            bleu = float(s.split(',')[0].replace('BLEU = ', ''))
+            max_bleu = max(max_bleu, bleu)
+        except Exception:
+            pass
+
+        logger.info('[%s] BLEU score: %.3f' % (y, bleu))
     logger.info('#' * 70)
 
-    experiment.log_metric('Bleu score', bleu)
+    experiment.log_metric('Bleu score', max_bleu)
     experiment.log_asset('./data/training_logs.txt')
     experiment.log_asset_folder('%s/.guild/sourcecode/models' % (run_dir))
     experiment.log_asset_folder('%s/.guild/sourcecode/modules' % (run_dir))

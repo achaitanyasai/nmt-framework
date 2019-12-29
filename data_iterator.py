@@ -5,9 +5,8 @@ Data iterators
 '''
 
 import os
-import logging
-import random
 import secrets
+import random
 
 import numpy as np
 import torch
@@ -71,7 +70,7 @@ class Field(object):
         _d = {}
         __d = {}
         for sentence in raw_sentences:
-            # TODO: # WARN: we are not truncating the max length here. It should be done in the caller.
+            # TODO(Just a warning): # WARN: we are not truncating the max length here. It should be done in the caller.
             if type(sentence) == type(''):
                 sentence = sentence.split()
             for word in sentence:
@@ -87,11 +86,9 @@ class Field(object):
         logger.info('Vocab size: %d (%.2f%%)' % (
         len(_sd) - num_unknown_tokens, 100.0 - (num_unknown_tokens * 100.0) / len(_sd)))
 
-        if self.ignoreTooManyUnk:
-            logger.warning("Ignoring too many unknowns because of ignoreTooManyUnk flag")
         if not self.ignoreTooManyUnk and (num_unknown_tokens * 100.0) / len(_sd) >= 20.00:
             if self.maxVocabSize >= 100000:
-                logger.warning('Ignoring too many unknowns option as vocabulary size is more than 100K')
+                logger.info('Ignoring too many unknowns option as vocabulary size is more than 100K')
             else:
                 logger.error('Too many unknowns. Please increase vocabulary size')
                 raise Exception('Too many unknowns. Please increase vocabulary size\n')
@@ -107,7 +104,7 @@ class Field(object):
         for i in _sd[:self.maxVocabSize - v]:
             __d[i[0]] = i[1]
 
-        for sentence in tqdm.tqdm(raw_sentences):
+        for sentence in raw_sentences:
             if type(sentence) == type(''):
                 sentence = sentence.split()
             for word in sentence:
@@ -124,6 +121,42 @@ class Field(object):
                 #     self.nWords += 1
                 # else:
                 #     self.word2count[word] += 1
+        del _sd
+        del _d
+        del __d
+
+    def build_vocab_V2(self, _d):
+        assert len(_d) > 0
+        _sd = sorted(_d.items(), key=operator.itemgetter(1), reverse=True)
+        num_unknown_tokens = max(0, len(_sd) - self.maxVocabSize)
+        self.unkCount = num_unknown_tokens
+
+        logger.info('Unknown tokens: %d (%.2f%%)' % (num_unknown_tokens, (num_unknown_tokens * 100.0) / len(_sd)))
+        logger.info('Vocab size: %d (%.2f%%)' % (
+        len(_sd) - num_unknown_tokens, 100.0 - (num_unknown_tokens * 100.0) / len(_sd)))
+
+        if not self.ignoreTooManyUnk and (num_unknown_tokens * 100.0) / len(_sd) >= 20.00:
+            if self.maxVocabSize >= 100000:
+                logger.info('Ignoring too many unknowns option as vocabulary size is more than 100K')
+            else:
+                logger.error('Too many unknowns. Please increase vocabulary size')
+                raise Exception('Too many unknowns. Please increase vocabulary size\n')
+
+        if not self.ignoreTooManyUnk and (num_unknown_tokens * 100.0) / len(_sd) <= 2.00:
+            logger.error('Very few unknowns. Please decrease vocabulary size')
+            raise Exception('Very few unknowns. Please decrease vocabulary size\n')
+
+        if self.langType == 'source':
+            v = 2
+        else:
+            v = 4
+        __d = {}
+
+        for i in _sd[:self.maxVocabSize - v]:
+            __d[i[0]] = i[1]
+        for word in _d:
+            if word in __d:
+                self.add_word(word)
         del _sd
         del _d
         del __d
@@ -202,8 +235,7 @@ class DataIterator(object):
             logger.warning('Please shuffle the training set')
 
         self.basefname = fname
-        self.salt = secrets.token_hex(8)
-        self.preprocessedfname = fname + '.' + self.salt + '.tmp'
+        self.preprocessedfname = fname + '.tmp'
         self.copy_file(self.basefname, self.preprocessedfname)
 
         if fields is None:
@@ -250,116 +282,142 @@ class DataIterator(object):
                 pass
             except AttributeError:
                 pass
-        else:
-            assert False
 
     def __iter__(self):
         return self
 
     def copy_file(self, source_file, destination_file):
-        # Just a hack to prevent huge memory usage
-        # logger.info('Copying file')
-        # os.system('cp %s %s' % (source_file, destination_file))
-        # logger.info('Ended Copying file')
-
         f = open(source_file)
         g = open(destination_file, 'w')
         for line in f.readlines():
             x = line.lower().strip()
-            g.write(x + '\n')
-        g.close()
+            if x != '':
+                g.write(x + '\n')
+
         f.close()
-        # f = open(source_file)
-        # x = f.read().lower().strip()
-        # f.close()
-        #
-        # f = open(destination_file, 'w')
-        # f.write(x)
-        # f.close()
-        # del x
+        g.close()
 
     def preprocess(self, fname, src_max_len, tgt_max_len, src_max_vocab_size, tgt_max_vocab_size, ignore_too_many_unknowns):
-        logger.info('Preprocessing')
+
         sourceField = Field('source', max_vocab_size=src_max_vocab_size, ignore_too_many_unknowns=ignore_too_many_unknowns)
         targetField = Field('target', max_vocab_size=tgt_max_vocab_size, ignore_too_many_unknowns=ignore_too_many_unknowns)
         csvFile = open(fname)
-        src = []
-        tgt = []
-        for row in tqdm.tqdm(csv.reader(csvFile, delimiter=",", quotechar='"')):
+
+        of = open(self.preprocessedfname, 'w')
+        csvwriter = csv.writer(of, delimiter=",", quotechar='"', quoting=csv.QUOTE_MINIMAL)
+
+        src_dict = {}
+        tgt_dict = {}
+        for row in csv.reader(csvFile, delimiter=",", quotechar='"'):
             # FIXME: applying lower() here
             cur_src = row[0].lower().strip().split()
             cur_tgt = row[1].lower().strip().split()
             # Note that this should only be done to training data.
             if (len(cur_src) <= src_max_len + 0) and (len(cur_tgt) <= tgt_max_len + 0):
-                src.append(cur_src)
-                tgt.append(cur_tgt)
+                csvwriter.writerow([' '.join(cur_src), ' '.join(cur_tgt)])
+                for word in cur_src:
+                    try:
+                        src_dict[word] += 1
+                    except KeyError:
+                        src_dict[word] = 1
+                for word in cur_tgt:
+                    try:
+                        tgt_dict[word] += 1
+                    except KeyError:
+                        tgt_dict[word] = 1
+
+        sourceField.build_vocab_V2(src_dict)
+        targetField.build_vocab_V2(tgt_dict)
+
         csvFile.close()
-
-        sourceField.build_vocab(src)
-        targetField.build_vocab(tgt)
-
-        of = open(self.preprocessedfname, 'w')
-        csvwriter = csv.writer(of, delimiter=",", quotechar='"', quoting=csv.QUOTE_MINIMAL)
-        for i, j in zip(src, tgt):
-            csvwriter.writerow([' '.join(i), ' '.join(j)])
         of.close()
+
         return (sourceField, targetField)
 
     def reset(self):
+        '''
+        This method is deprecated because of too much memory usage. Please use self.resetV2()
+        for optimized memory usage
+        :return:
+        '''
+
+        self.resetV2()
+        return
+
         self.sentidx = 0
         if self.shuffle:
-            # Memory optimized shuffling
-            tmp_name = '%s.tmp123' % self.preprocessedfname
-            os.system('bash /tmp/shuffle_file.sh %s %s.tmp123' % (self.preprocessedfname, self.preprocessedfname))
-            f = open(tmp_name)
+            random.shuffle(self.order)
+            csvFile = open(self.basefname)
+            rows = []
+            for row in csv.reader(csvFile, delimiter=",", quotechar='"'):
+                rows.append(row)
+            csvFile.close()
+
             of = open(self.preprocessedfname, 'w')
             csvwriter = csv.writer(of, delimiter=",", quotechar='"', quoting=csv.QUOTE_MINIMAL)
-            for row in csv.reader(f, delimiter=',', quotechar='"'):
-                src = row[0]
+            L = len(self.order)
+            for i in range(L):
+                src = rows[self.order[i]][0]
+                tgt = rows[self.order[i]][1]
                 cur_src = src.lower().strip().split()
-                tgt = row[1]
                 cur_tgt = tgt.lower().strip().split()
-                if (len(cur_src) <= self.src_max_len + 0) and (len(cur_tgt) <= self.tgt_max_len):
+                # Note that this should only be done to training data.
+                if (len(cur_src) <= self.src_max_len + 0) and (len(cur_tgt) <= self.tgt_max_len + 0):
                     csvwriter.writerow([src, tgt])
             of.close()
-            os.system('rm %s.tmp123' % self.preprocessedfname)
-
-            # random.shuffle(self.order)
-            # csvFile = open(self.basefname)
-            # rows = []
-            # for row in csv.reader(csvFile, delimiter=",", quotechar='"'):
-            #     rows.append(row)
-            # csvFile.close()
-            #
-            # of = open(self.preprocessedfname, 'w')
-            # csvwriter = csv.writer(of, delimiter=",", quotechar='"', quoting=csv.QUOTE_MINIMAL)
-            # L = len(self.order)
-            # for i in range(L):
-            #     src = rows[self.order[i]][0]
-            #     tgt = rows[self.order[i]][1]
-            #     cur_src = src.lower().strip().split()
-            #     cur_tgt = tgt.lower().strip().split()
-            #     # Note that this should only be done to training data.
-            #     if (len(cur_src) <= self.src_max_len + 0) and (len(cur_tgt) <= self.tgt_max_len + 0):
-            #         csvwriter.writerow([src, tgt])
-            # of.close()
-        else:
-            if self.dataType == 'train':
-                f = open(self.basefname)
-                of = open(self.preprocessedfname, 'w')
-                csvwriter = csv.writer(of, delimiter=",", quotechar='"', quoting=csv.QUOTE_MINIMAL)
-                for row in csv.reader(f, delimiter=',', quotechar='"'):
-                    src = row[0]
-                    cur_src = src.lower().strip().split()
-                    tgt = row[1]
-                    cur_tgt = tgt.lower().strip().split()
-                    if (len(cur_src) <= self.src_max_len + 0) and (len(cur_tgt) <= self.tgt_max_len):
-                        csvwriter.writerow([src, tgt])
-                of.close()
-            else:
-                os.system('cp %s %s' % (self.basefname, self.preprocessedfname))
         self.next = self.nextgen()
-    
+
+    def resetV2(self):
+        self.sentidx = 0
+        if self.shuffle:
+            salt = secrets.token_hex(8)
+            src_tmp_file = 'data/src.%s.txt.tmp' % salt
+            tgt_tmp_file = 'data/tgt.%s.txt.tmp' % salt
+
+            random.shuffle(self.order)
+            csvFile = open(self.basefname)
+            rows_src = []
+            for row in csv.reader(csvFile, delimiter=",", quotechar='"'):
+                rows_src.append(row[0])
+            csvFile.close()
+            L = len(self.order)
+
+            f = open(src_tmp_file, 'w')
+            for i in range(L):
+                src = rows_src[self.order[i]]
+                f.write('%s\n' % src.strip())
+            f.close()
+            del rows_src
+
+            csvFile = open(self.basefname)
+            rows_tgt = []
+            for row in csv.reader(csvFile, delimiter=",", quotechar='"'):
+                rows_tgt.append(row[1])
+            csvFile.close()
+            L = len(self.order)
+            f = open(tgt_tmp_file, 'w')
+            for i in range(L):
+                tgt = rows_tgt[self.order[i]]
+                f.write('%s\n' % tgt.strip())
+            f.close()
+            del rows_tgt
+
+            of = open(self.preprocessedfname, 'w')
+            csvwriter = csv.writer(of, delimiter=",", quotechar='"', quoting=csv.QUOTE_MINIMAL)
+
+            sf = open(src_tmp_file)
+            tf = open(tgt_tmp_file)
+            for src, tgt in zip(sf.readlines(), tf.readlines()):
+                cur_src = src.lower().strip().split()
+                cur_tgt = tgt.lower().strip().split()
+                if (len(cur_src) <= self.src_max_len + 0) and (len(cur_tgt) <= self.tgt_max_len + 0):
+                    csvwriter.writerow([src.strip(), tgt.strip()])
+            of.close()
+
+            os.system('rm %s' % src_tmp_file)
+            os.system('rm %s' % tgt_tmp_file)
+        self.next = self.nextgen()
+
     def nextgen(self):
         with open(self.preprocessedfname) as fileDescriptor:
             self.csvReader = csv.reader(fileDescriptor)

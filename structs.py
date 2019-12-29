@@ -1,4 +1,5 @@
 import os
+import coloredlogs
 import logging
 import torch
 
@@ -12,6 +13,8 @@ fh.setLevel(logging.DEBUG)
 formatter = logging.Formatter('%(asctime)s %(levelname)8s --- %(message)s (%(filename)s:%(lineno)s)','%Y-%m-%d | %H:%M:%S')
 fh.setFormatter(formatter)
 logger.addHandler(fh)
+
+# coloredlogs.install(logger=logger)
 
 class Criterions(object):
     def __init__(self, train_criterion,

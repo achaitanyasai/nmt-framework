@@ -6,7 +6,6 @@ Translate the given data
 '''
 
 import argparse
-import logging
 import math
 import os
 import pickle

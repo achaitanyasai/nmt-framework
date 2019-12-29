@@ -92,6 +92,20 @@
 
         norm_method:
           default: "sents"
+        model_type:
+#         Allowed options:
+#          - seq2seq_baseline
+#          - seq2seq_baseline_word_attn
+#          - seq2seq_multivec
+#          - seq2seq_multivec_word_attn
+          default: "seq2seq_baseline"
+        valid_steps:
+          default: 250
+        patience_steps:
+          default: 10
+
+        expt_name:
+          default: ""
 
   references:
     - Some ref
