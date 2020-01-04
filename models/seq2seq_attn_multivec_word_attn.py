@@ -340,24 +340,24 @@ class encoder(nn.Module):
         # return emb, penalty
 
 
-
 class decoderBase(nn.Module):
     '''
     decoder base module
     '''
-    def __init__(self, 
-        rnn_type, 
-        bidirectional_encoder,
-        num_layers,
-        hidden_size,
-        vocab_size,
-        embedding_dim,
-        pad_token,
-        attn_type = 'general',
-        coverage_attn = False,
-        copy_attn = False,
-        context_gate = None,
-        dropout = 0.0):
+
+    def __init__(self,
+                 rnn_type,
+                 bidirectional_encoder,
+                 num_layers,
+                 hidden_size,
+                 vocab_size,
+                 embedding_dim,
+                 pad_token,
+                 attn_type='general',
+                 coverage_attn=False,
+                 copy_attn=False,
+                 context_gate=None,
+                 dropout=0.0):
         super(decoderBase, self).__init__()
         self.decoder_type = 'rnn'
         self.bidirectional_encoder = bidirectional_encoder
@@ -378,14 +378,14 @@ class decoderBase(nn.Module):
         )
 
         self.rnn = self._build_rnn(
-            rnn_type, 
+            rnn_type,
             self.embedding_dim + self.hidden_size,
             self.hidden_size,
             self.num_layers,
             dropout
         )
 
-        #FIXME: think about using Tanh() here.
+        # FIXME: think about using Tanh() here.
         self.decoder2vocab = nn.Sequential(
             nn.Linear(self.hidden_size, self.vocab_size),
             nn.LogSoftmax(dim=-1)
@@ -407,31 +407,26 @@ class decoderBase(nn.Module):
             )
             self._copy = True
 
-        # self.encoder_context_transform = nn.Sequential(
-        #     nn.Linear(self.hidden_size * 2, self.hidden_size, bias=False)
-        # )
+        self.context_dropout = nn.Dropout(0.4)
+        self.l1 = nn.Linear(self.hidden_size, self.hidden_size)
+        self.l2 = nn.Linear(self.hidden_size, self.hidden_size)
+        self.l3 = nn.Linear(self.hidden_size, self.hidden_size)
 
-        self.context_transform = nn.Linear(self.hidden_size, self.hidden_size)
-        self.src_embedding_transform = nn.Linear(self.hidden_size, self.hidden_size)
-        self.sigmoid = nn.Sigmoid()
-        self.context_dropout = nn.Dropout(0.2)
-    
     def forward(
-        self,
-        input,
-        input_charngrams,
-        context,
-        encoder_embeddings,
-        state,
-        context_lengths):
-
+            self,
+            input,
+            input_charngrams,
+            context,
+            encoder_embeddings,
+            state,
+            context_lengths):
         assert isinstance(state, RNNDecoderState)
         input_len, input_batch = input.size()
         context_len, context_batch, _ = context.size()
 
         utils.aeq(input_batch, context_batch)
 
-        hidden, outputs, attns, coverage = self._run_forward_pass(input, input_charngrams, context, encoder_embeddings, state, context_lengths = context_lengths)
+        hidden, outputs, attns, coverage = self._run_forward_pass(input, input_charngrams, context, encoder_embeddings, state, context_lengths=context_lengths)
 
         final_output = outputs[-1]
         state.update_state(hidden, final_output.unsqueeze(0), coverage.unsqueeze(0) if coverage is not None else None)
@@ -439,7 +434,7 @@ class decoderBase(nn.Module):
         outputs = torch.stack(outputs)
         for k in attns:
             attns[k] = torch.stack(attns[k])
-        
+
         predictions = self.decode(outputs)
         return outputs, state, attns, predictions
 
@@ -462,25 +457,41 @@ class decoderBase(nn.Module):
         else: #GRU
             return RNNDecoderState(context, self.hidden_size, self._fix_enc_hidden(enc_hidden))
 
-    def combine_embeddings(self, pred_emb_forward, pred_emb_backward):
-        s_len, n_batch, _ = pred_emb_forward.shape
-        pred_emb_forward = pred_emb_forward.contiguous().view(s_len * n_batch, -1)
-        pred_emb_backward = pred_emb_backward.contiguous().view(s_len * n_batch, -1)
-        gate = self.sigmoid(self.context_transform(pred_emb_forward) + self.src_embedding_transform(pred_emb_backward)).view(s_len, n_batch, -1)
-        pred_emb_forward = pred_emb_forward.contiguous().view(s_len, n_batch, -1)
-        pred_emb_backward = pred_emb_backward.contiguous().view(s_len, n_batch, -1)
-        pred_emb_forward = pred_emb_forward.mul(gate)
-        pred_emb_backward = pred_emb_backward.mul(-gate.sub(1))
-        pred_emb_forward = pred_emb_forward.add(pred_emb_backward)
-        # pred_emb_forward = self.context_dropout(pred_emb_forward)
-        return pred_emb_forward
 
-        
 class decoder(decoderBase):
     '''
     Input feed decoder
     '''
-    def _run_forward_pass(self, input, input_hashes, context, encoder_embeddings, state, context_lengths = None):
+
+    def context_attention(self, x, y, z):
+        og = torch.sigmoid(self.l1(x) + self.l2(y) + self.l3(z))
+        o1 = torch.mul(x, og)
+        o2 = torch.mul(y, 1 - og)
+        o = torch.add(o1, o2)
+        o = self.context_dropout(o)
+        return o
+
+    def get_reformed_context(self, context, encoder_embeddings, rnn_output, rnn_hidden, context_lengths):
+        s_len, n_batch, dim = context.shape
+        _context = context.contiguous().view(-1, dim)
+        _rnn_out = rnn_output.unsqueeze(0).repeat(s_len, 1, 1).view(-1, dim)
+
+        _context = self.context_attention(_context, encoder_embeddings, _rnn_out)
+        _context = _context.view(s_len, n_batch, dim)
+
+        # j = n_batch - 1
+        # for i in range(s_len):
+        #     while j >= 0 and context_lengths[j] < i + 1:
+        #         j -= 1
+        #     x = context[i][:j + 1]
+        #     y = encoder_embeddings[i][:j + 1]
+        #     z = rnn_output[:j + 1]
+        #     w = self.context_attention(x, y, z)
+        #     _context[i][: j + 1] = w
+        # return _context
+        return _context
+
+    def _run_forward_pass(self, input, input_hashes, context, encoder_embeddings, state, context_lengths=None):
         output = state.input_feed.squeeze(0)
         output_batch, _ = output.size()
         input_len, input_batch = input.size()
@@ -490,7 +501,7 @@ class decoder(decoderBase):
         assert not self._coverage
 
         outputs = []
-        attns = {'std' : []}
+        attns = {'std': []}
         if self._copy:
             attns['copy'] = []
         if self._coverage:
@@ -498,58 +509,54 @@ class decoder(decoderBase):
 
         emb = self.embeddings(input)
 
-        # context = torch.cat([context, encoder_embeddings], dim=2)
-        context = self.combine_embeddings(context, encoder_embeddings)
-        # b_size, s_len, dim = context.shape
-        # context = context.view(b_size * s_len, -1)
-        # context = self.encoder_context_transform(context)
-        # context = context.view(b_size, s_len, -1)
-
         s_len, batch_size, embedding_dim = emb.size()
-        assert(embedding_dim == self.embedding_dim)
+        assert (embedding_dim == self.embedding_dim)
         assert emb.dim() == 3
-        
+
         hidden = state.hidden
         coverage = state.coverage.squeeze(0) if state.coverage is not None else None
-        
+
+        # It is assumed that hidden size == encoder embedding dim
+        encoder_embeddings = encoder_embeddings.contiguous().view(-1, self.hidden_size)
+
         for i, emb_t in enumerate(emb.split(1)):
             emb_t = emb_t.squeeze(0)
-            emb_t = torch.cat([emb_t, output], 1) #Input feed
+            emb_t = torch.cat([emb_t, output], 1)  # Input feed
 
             rnn_output, hidden = self.rnn(emb_t, hidden)
+
+            _context = self.get_reformed_context(context, encoder_embeddings, rnn_output, hidden, context_lengths)
             attn_output, attn = self.attn(
                 rnn_output,
-                context.transpose(0, 1),
-                context_lengths = context_lengths)
-            #TODO: context gate, see:
-            #https://github.com/OpenNMT/OpenNMT-py/blob/master/onmt/Models.py#L465
+                _context.transpose(0, 1),
+                context_lengths=context_lengths)
+            # TODO: context gate, see:
+            # https://github.com/OpenNMT/OpenNMT-py/blob/master/onmt/Models.py#L465
             output = self.dropout(attn_output)
             outputs += [output]
             attns['std'] += [attn]
 
             if self._coverage:
-                raise NotImplementedError("Learn about coverage attention first")
                 coverage = coverage + attn \
                     if coverage is not None else attn
                 attns['coverage'] += [coverage]
-            
+
             if self._copy:
-                raise NotImplementedError("Learn about copy attention first")
-                # _, copy_attn = self.copy_attn(output, context.transpose(0, 1))
-                # attns['copy'] += [copy_attn]
-        
+                _, copy_attn = self.copy_attn(output, context.transpose(0, 1))
+                attns['copy'] += [copy_attn]
+
         return hidden, outputs, attns, coverage
 
     def _build_rnn(
-        self,
-        rnn_type,
-        input_size,
-        hidden_size,
-        num_layers,
-        dropout):
-        cell = utils.StackedLSTM #Multi Layered LSTM for input feed
+            self,
+            rnn_type,
+            input_size,
+            hidden_size,
+            num_layers,
+            dropout):
+        cell = utils.StackedLSTM  # Multi Layered LSTM for input feed
         if rnn_type == 'GRU':
-            cell = utils.StackedGRU #Multi Layered GRU for input feed
+            cell = utils.StackedGRU  # Multi Layered GRU for input feed
         return cell(num_layers, input_size, hidden_size, dropout)
 
 class Seq2SeqAttention(nn.Module):

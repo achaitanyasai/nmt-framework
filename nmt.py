@@ -28,6 +28,7 @@ import data_iterator
 import util
 from models import seq2seq_attn, seq2seq_attn_baseline, seq2seq_attn_multivec, seq2seq_attn_baseline_word_attn, seq2seq_attn_multivec_word_attn
 from modules import Loss, Optimizer, Trainer, Beam, Translator
+from modules import  utils as module_utils
 import subprocess
 import warnings
 import datetime
@@ -38,6 +39,8 @@ import neptune
 # https://github.com/pytorch/pytorch/issues/114 
 
 torch.backends.cudnn.deterministic = True
+torch.backends.cudnn.benchmark = True
+torch.backends.cudnn.enabled = True
 
 random.seed(346)
 np.random.seed(346)
@@ -302,14 +305,18 @@ def train(args):
 
             experiment.log_metric('Training Loss', stats._loss(), step=steps)
             experiment.log_metric('Training Accuracy', stats.accuracy(), step=steps)
-            torch.save(args.model.state_dict(), "./data/model_every_10steps.pt")
+            if steps >= args.steps - 20:
+                torch.save(args.model.state_dict(), "./data/model_every_10steps.pt")
 
         if steps >= args.valid_steps and steps % args.valid_steps == 0:
             args.iterators.valid_iterator.reset()
-            valid_stats = trainer.validate(args.iterators.valid_iterator, b_size=10)
+            valid_stats = trainer.validate(args.iterators.valid_iterator, b_size=50)
 
             args.iterators.valid_iterator.reset()
-            valid_stats1 = trainer.validate_fixed(args.iterators.valid_iterator, b_size=10)
+            if steps >= args.steps - 1500:
+                valid_stats1 = trainer.validate_fixed(args.iterators.valid_iterator, b_size=50)
+            else:
+                valid_stats1 = module_utils.Statistics()
 
             trainer.lr_step(valid_stats._loss(), steps)
             logger.info('\n' + '=' * 20 + '\nStep: %d, valid_loss: %.6f | %.6f, valid_accuracy: %.6f | %.6f, LR: %.6f, patience: %d\n' % (
@@ -342,7 +349,7 @@ def train(args):
             best_loss_real = min(best_loss_real, cur_loss_real)
             best_accuracy_real = max(best_accuracy_real, cur_acc_real)
 
-        if steps >= 500 and steps % 500 == 0:
+        if steps >= 2000 and steps % 2000 == 0:
             logger.info('Sleeping for 2 minutes')
             time.sleep(120)
         if args.optimizer.lrate <= 1e-7:
@@ -445,7 +452,7 @@ if __name__ == '__main__':
         disabled = True
 
     experiment = Experiment(api_key="G1Hu2kJ89qGE5sZ1cBNlrq6Hj",
-                            project_name="english-hindi", workspace="achaitanyasai",
+                            project_name="english-german", workspace="achaitanyasai",
                             disabled=disabled)
 
     # experiment.log_asset(file_data='./models/seq2seq_attn.py', file_name='seq2seq_attn.py', overwrite=False)
@@ -511,7 +518,10 @@ if __name__ == '__main__':
         args.iterators.test_iterator.reset()
         translate(args, iterators)
 
-        s = os.popen('perl %s/.guild/sourcecode/scripts/bleu-1.04.pl %s < ./data/predicted.txt' % (run_dir, args.testset_target)).read().strip()
+        if args.expt_name != 'test':
+            s = os.popen('perl %s/.guild/sourcecode/scripts/bleu-1.04.pl %s < ./data/predicted.txt' % (run_dir, args.testset_target)).read().strip()
+        else:
+            s = os.popen('perl ./scripts/bleu-1.04.pl %s < ./data/predicted.txt' % (args.testset_target)).read().strip()
 
         x = args.testset_target.strip('/')
         x = x.split('/')[-1]

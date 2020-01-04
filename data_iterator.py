@@ -270,6 +270,17 @@ class DataIterator(object):
             self.sourceField.word2count = self.targetField.word2count
         del fields
 
+        # f = open('/tmp/vocab.en', 'w')
+        # for word in self.sourceField.word2idx:
+        #     f.write('%s\n' % word)
+        # f.close()
+        #
+        # f = open('/tmp/vocab.hi', 'w')
+        # for word in self.targetField.word2idx:
+        #     f.write('%s\n' % word)
+        # f.close()
+        # exit(0)
+
     def __del__(self):
         if self.cleanup:
             try:
@@ -422,9 +433,9 @@ class DataIterator(object):
         with open(self.preprocessedfname) as fileDescriptor:
             self.csvReader = csv.reader(fileDescriptor)
             for row in self.csvReader:
-                source_sentence = row[0].lower()
+                source_sentence = row[0]
                 if self.dataType in ['train', 'valid', 'test']:
-                    target_sentence = row[1].lower()
+                    target_sentence = row[1]
                 else:
                     target_sentence = None
                 yield (source_sentence, target_sentence, self.sentidx)

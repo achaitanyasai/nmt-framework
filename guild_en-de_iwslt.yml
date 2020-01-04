@@ -21,7 +21,7 @@
           default: "/home/chaitanya/Datasets/english-german/test.en-de.csv"
         adagram_embeddings_dir:
           description: Directory containing adagram vectors
-          default: "/home/chaitanya/Research/ShataAnuvadak/_pytorch/all_indian_languages/data/monolingual/english/wmt/"
+          default: "/home/chaitanya/Research/ShataAnuvadak/_pytorch/all_indian_languages/data/monolingual/english/wiki/"
         testset_target:
           description: Directory containing adagram vectors
           default: "/home/chaitanya/Datasets/english-german/test.de"
@@ -43,7 +43,7 @@
 #        use_epochs:
 #          arg-switch: no
         ignore_too_many_unknowns:
-          default: 1
+          default: 0
         bidirectional:
           default: 1
         encoder_num_layers:
@@ -65,9 +65,9 @@
         decoder_attention_type:
           default: "general"
         optimizer:
-          default: "adam"
+          default: "sgd"
         lrate:
-          default: 0.001
+          default: 1.0
         max_grad_norm:
           default: 5.0
         start_decay_at:
@@ -89,7 +89,7 @@
           default: 0.999
 
         batch_size:
-          default: 64
+          default: 80
 
         norm_method:
           default: "sents"
@@ -99,7 +99,7 @@
 #          - seq2seq_baseline_word_attn
 #          - seq2seq_multivec
 #          - seq2seq_multivec_word_attn
-          default: "seq2seq_multivec"
+          default: "seq2seq_baseline"
         valid_steps:
           default: 250
         patience_steps:
