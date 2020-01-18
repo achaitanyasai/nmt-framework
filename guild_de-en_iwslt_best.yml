@@ -12,19 +12,19 @@
       flags:
         train_dataset:
           description: Path to training corpus in csv file
-          default: "/home/chaitanya/Datasets/english-hindi/train.en-hn.csv"
+          default: "/home/chaitanya/Datasets/german-english/train.de-en.csv"
         valid_dataset:
           description: Path to validation corpus in csv file
-          default: "/home/chaitanya/Datasets/english-hindi/valid.en-hn.csv"
+          default: "/home/chaitanya/Datasets/german-english/valid.de-en.csv"
         test_dataset:
           description: Path to test corpus in csv file
-          default: "/home/chaitanya/Datasets/english-hindi/test.en-hn.csv"
+          default: "/home/chaitanya/Datasets/german-english/test.de-en.csv"
         adagram_embeddings_dir:
           description: Directory containing adagram vectors
-          default: "/home/chaitanya/Research/ShataAnuvadak/_pytorch/all_indian_languages/data/monolingual/english/wiki/"
+          default: "/home/chaitanya/Research/ShataAnuvadak/_pytorch/all_indian_languages/data/monolingual/german/"
         testset_target:
           description: Directory containing adagram vectors
-          default: "/home/chaitanya/Datasets/english-hindi/test.hn"
+          default: "/home/chaitanya/Datasets/german-english/test.en"
         save_to:
           description: Path to test corpus in csv file
           default: "data/model.pt"
@@ -37,13 +37,13 @@
         target_max_len:
           default: 50
         source_max_vocab_size:
-          default: 26000
+          default: 60000
         target_max_vocab_size:
-          default: 36000
+          default: 46000
 #        use_epochs:
 #          arg-switch: no
         ignore_too_many_unknowns:
-          default: 0
+          default: 1
         bidirectional:
           default: 1
         encoder_num_layers:
@@ -75,7 +75,7 @@
         decay_lrate_steps:
           default: 1000
         steps:
-          default: 20000
+          default: 25000
         lrate_decay:
           default: 0.5
 #        TODO: check warmup steps
@@ -89,7 +89,7 @@
           default: 0.999
 
         batch_size:
-          default: 80
+          default: 64
 
         norm_method:
           default: "sents"
@@ -99,11 +99,11 @@
 #          - seq2seq_baseline_word_attn
 #          - seq2seq_multivec
 #          - seq2seq_multivec_word_attn
-          default: "seq2seq_multivec_word_attn"
+          default: "seq2seq_multivec"
         valid_steps:
           default: 250
         patience_steps:
-          default: 10
+          default: 6
 
         expt_name:
           default: ""

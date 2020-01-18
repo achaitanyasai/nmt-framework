@@ -310,16 +310,16 @@ def train(args):
 
         if steps >= args.valid_steps and steps % args.valid_steps == 0:
             args.iterators.valid_iterator.reset()
-            valid_stats = trainer.validate(args.iterators.valid_iterator, b_size=50)
+            valid_stats = trainer.validate(args.iterators.valid_iterator, b_size=20)
 
             args.iterators.valid_iterator.reset()
             if steps >= args.steps - 1500:
-                valid_stats1 = trainer.validate_fixed(args.iterators.valid_iterator, b_size=50)
+                valid_stats1 = trainer.validate_fixed(args.iterators.valid_iterator, b_size=20)
             else:
                 valid_stats1 = module_utils.Statistics()
 
             trainer.lr_step(valid_stats._loss(), steps)
-            logger.info('\n' + '=' * 20 + '\nStep: %d, valid_loss: %.6f | %.6f, valid_accuracy: %.6f | %.6f, LR: %.6f, patience: %d\n' % (
+            logger.info('\n' + '=' * 20 + '\nStep: %d, valid_loss: %.6f | %.6f, valid_accuracy: %.6f | %.6f, LR: %.9f, patience: %d\n' % (
             steps, valid_stats._loss(), valid_stats1._loss(), valid_stats.accuracy(), valid_stats1.accuracy(), args.optimizer.lrate, args.optimizer.patience) + '=' * 20)
 
             cur_loss = valid_stats._loss()
@@ -353,6 +353,7 @@ def train(args):
             logger.info('Sleeping for 2 minutes')
             time.sleep(120)
         if args.optimizer.lrate <= 1e-7:
+            torch.save(args.model.state_dict(), "./data/model_every_10steps.pt")
             break
     except KeyboardInterrupt:
       pass
@@ -448,11 +449,11 @@ if __name__ == '__main__':
 
     args = parse_arguments()
     disabled = False
-    if args.expt_name == 'test':
+    if args.expt_name == 'test' or args.expt_name == 'dev':
         disabled = True
 
     experiment = Experiment(api_key="G1Hu2kJ89qGE5sZ1cBNlrq6Hj",
-                            project_name="english-german", workspace="achaitanyasai",
+                            project_name="german-english", workspace="achaitanyasai",
                             disabled=disabled)
 
     # experiment.log_asset(file_data='./models/seq2seq_attn.py', file_name='seq2seq_attn.py', overwrite=False)

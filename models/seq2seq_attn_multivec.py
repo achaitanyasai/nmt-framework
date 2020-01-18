@@ -92,11 +92,13 @@ class encoder(nn.Module):
         assert(hidden_size % self.num_directions == 0)
         self.hidden_size = hidden_size // self.num_directions
 
+        # TODO: Please remove this hardcoding dropout
+        logger.warning('Please remove the hardcoding dropout in self.rnn')
         self.rnn = getattr(nn, rnn_type)( #LSTM or GRU
             input_size = embedding_dim, 
             hidden_size = self.hidden_size, 
             num_layers = num_layers - 1,
-            dropout = dropout, 
+            dropout = 0.1,
             bidirectional = self.bidirectional
         )
 
@@ -191,7 +193,8 @@ class encoder(nn.Module):
             if layer_num + 1 == self.num_layers:
                 apply_dropout = False
             if self.bidirectional:
-                hidden_forward, outputs_forward, _penalty, pred_emb_forward = self._forward(seq_input, None, lengths, (self.forward_initial_h, self.forward_initial_c), layer_num, True, apply_dropout)
+                hidden_forward, outputs_forward, _penalty, pred_emb_forward = self._forward(seq_input, None, lengths, (
+                    self.forward_initial_h, self.forward_initial_c), layer_num, True, apply_dropout)
                 requires_grad = True
                 if layer_num == 0:
                     requires_grad = False
@@ -200,7 +203,12 @@ class encoder(nn.Module):
                     else:
                         penalty = penalty + _penalty
                 input_reverse = self.reverse(seq_input, lengths, requires_grad=requires_grad)
-                hidden_backward, outputs_backward, _penalty, pred_emb_backward = self._forward(input_reverse, None, lengths, (self.backward_initial_h, self.backward_initial_c), layer_num, False, apply_dropout)
+                hidden_backward, outputs_backward, _penalty, pred_emb_backward = self._forward(input_reverse, None,
+                                                                                               lengths, (
+                                                                                                   self.backward_initial_h,
+                                                                                                   self.backward_initial_c),
+                                                                                                   layer_num, False,
+                                                                                               apply_dropout)
                 if layer_num == 0:
                     if penalty is None:
                         penalty = _penalty
@@ -214,8 +222,8 @@ class encoder(nn.Module):
                     # TODO: combine_embeddings() is one way to combine using gates. Think of other ways.
                     # pred_emb = torch.cat([pred_emb_forward, pred_emb_backward], dim=-1)
 
-                    pred_emb = self.combine_embeddings(pred_emb_forward, pred_emb_backward)
-                    assert pred_emb.shape == (s_len, n_batch, self.hidden_size * (1 + self.bidirectional))
+                    # pred_emb = self.combine_embeddings(pred_emb_forward, pred_emb_backward)
+                    # assert pred_emb.shape == (s_len, n_batch, self.hidden_size * (1 + self.bidirectional))
 
                 outputs_backward = self.reverse(outputs_backward, lengths, requires_grad=True)
                 outputs = torch.cat([outputs_forward, outputs_backward], 2)
@@ -231,11 +239,11 @@ class encoder(nn.Module):
         first_layer_hidden_h = torch.cat(final_hidden_h, 0)
         first_layer_hidden_c = torch.cat(final_hidden_c, 0)
 
-        assert seq_input.shape == pred_emb.shape
+        # assert seq_input.shape == pred_emb.shape
 
         hidden_t, last_layer_outputs = self.forward_normal_encoder(seq_input, lengths)
         final_hidden = (torch.cat([first_layer_hidden_h, hidden_t[0]], 0), torch.cat([first_layer_hidden_c, hidden_t[1]], 0))
-        return final_hidden, last_layer_outputs, penalty, pred_emb
+        return final_hidden, last_layer_outputs, penalty, None #pred_emb
 
     def forward_normal_encoder(self, emb, lengths):
         s_len, n_batch, embedding_dim = emb.shape

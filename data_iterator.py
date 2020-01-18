@@ -270,16 +270,15 @@ class DataIterator(object):
             self.sourceField.word2count = self.targetField.word2count
         del fields
 
-        # f = open('/tmp/vocab.en', 'w')
-        # for word in self.sourceField.word2idx:
-        #     f.write('%s\n' % word)
-        # f.close()
-        #
-        # f = open('/tmp/vocab.hi', 'w')
-        # for word in self.targetField.word2idx:
-        #     f.write('%s\n' % word)
-        # f.close()
-        # exit(0)
+        f = open('data/vocab.en', 'w')
+        for word in self.sourceField.word2idx:
+            f.write('%s\n' % word)
+        f.close()
+        
+        f = open('data/vocab.de', 'w')
+        for word in self.targetField.word2idx:
+            f.write('%s\n' % word)
+        f.close()
 
     def __del__(self):
         if self.cleanup:

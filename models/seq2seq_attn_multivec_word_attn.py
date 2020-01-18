@@ -62,18 +62,19 @@ class RNNDecoderState(DecoderState):
         self.hidden = tuple(vars[:-1])
         self.input_feed = vars[-1]
 
+
 class encoder(nn.Module):
     def __init__(
-            self, 
-            rnn_type, 
-            bidirectional, 
-            num_layers, 
+            self,
+            rnn_type,
+            bidirectional,
+            num_layers,
             hidden_size,
             vocab_size,
             embedding_dim,
             pad_token,
-            dropout = 0.4):
-        
+            dropout=0.4):
+
         super(encoder, self).__init__()
         self.dropout_prob = dropout
         self.no_pack_padded_seq = False
@@ -89,21 +90,23 @@ class encoder(nn.Module):
         self.relu = nn.ReLU()
         self.dropout = nn.Dropout(dropout)
 
-        assert(hidden_size % self.num_directions == 0)
+        assert (hidden_size % self.num_directions == 0)
         self.hidden_size = hidden_size // self.num_directions
 
-        self.rnn = getattr(nn, rnn_type)( #LSTM or GRU
-            input_size = embedding_dim, 
-            hidden_size = self.hidden_size, 
-            num_layers = num_layers, 
-            dropout = dropout, 
-            bidirectional = self.bidirectional
+        # TODO: Please remove this hardcoding dropout
+        logger.warning('Please remove the hardcoding dropout in self.rnn')
+        self.rnn = getattr(nn, rnn_type)(  # LSTM or GRU
+            input_size=embedding_dim,
+            hidden_size=self.hidden_size,
+            num_layers=num_layers - 1,
+            dropout=0.1,
+            bidirectional=self.bidirectional
         )
 
         self.layers = nn.ModuleList()
         input_size = embedding_dim
 
-        for i in range(num_layers):
+        for i in range(1):
             layer = nn.ModuleList()
             layer.append(nn.LSTMCell(input_size, self.hidden_size))
             if self.bidirectional:
@@ -149,8 +152,7 @@ class encoder(nn.Module):
             nn.Linear(self.embedding_dim * 2, self.embedding_dim),
             nn.Sigmoid()
         )
-        # self.embedding_dropout = nn.Dropout(0.3)
-        logger.info('Not using embedding attention')
+        self.embedding_dropout = nn.Dropout(0.2)
 
     def reverse(self, inputs, lengths, batch_first=False, requires_grad=False):
         # FIXME: fix requires_grad in reverse
@@ -174,18 +176,17 @@ class encoder(nn.Module):
         pred_emb_forward = pred_emb_forward.mul(gate)
         pred_emb_backward = pred_emb_backward.mul(-gate.sub(1))
         pred_emb_forward = pred_emb_forward.add(pred_emb_backward)
-        # pred_emb_forward = self.embedding_dropout(pred_emb_forward)
+        pred_emb_forward = self.embedding_dropout(pred_emb_forward)
         return pred_emb_forward
 
-    def forward(self, seq_input, input_hashes, lengths = None, hidden = None):
-        self.rnn.flatten_parameters()
+    def forward(self, seq_input, input_hashes, lengths=None, hidden=None):
         s_len, n_batch = seq_input.shape[0], seq_input.shape[1]
         final_hidden_h = []
         final_hidden_c = []
         penalty = None
         # word_embeddings = None
         pred_emb = None
-        for layer_num in range(self.num_layers):
+        for layer_num in range(1):
             if layer_num == 0:
                 pass
 
@@ -193,7 +194,8 @@ class encoder(nn.Module):
             if layer_num + 1 == self.num_layers:
                 apply_dropout = False
             if self.bidirectional:
-                hidden_forward, outputs_forward, _penalty, pred_emb_forward = self._forward(seq_input, None, lengths, (self.forward_initial_h, self.forward_initial_c), layer_num, True, apply_dropout)
+                hidden_forward, outputs_forward, _penalty, pred_emb_forward = self._forward(seq_input, None, lengths, (
+                self.forward_initial_h, self.forward_initial_c), layer_num, True, apply_dropout)
                 requires_grad = True
                 if layer_num == 0:
                     requires_grad = False
@@ -202,7 +204,12 @@ class encoder(nn.Module):
                     else:
                         penalty = penalty + _penalty
                 input_reverse = self.reverse(seq_input, lengths, requires_grad=requires_grad)
-                hidden_backward, outputs_backward, _penalty, pred_emb_backward = self._forward(input_reverse, None, lengths, (self.backward_initial_h, self.backward_initial_c), layer_num, False, apply_dropout)
+                hidden_backward, outputs_backward, _penalty, pred_emb_backward = self._forward(input_reverse, None,
+                                                                                               lengths, (
+                                                                                               self.backward_initial_h,
+                                                                                               self.backward_initial_c),
+                                                                                               layer_num, False,
+                                                                                               apply_dropout)
                 if layer_num == 0:
                     if penalty is None:
                         penalty = _penalty
@@ -230,18 +237,44 @@ class encoder(nn.Module):
             else:
                 raise Exception('Please use bidirectional encoder')
 
-        final_hidden_h = torch.cat(final_hidden_h, 0)
-        final_hidden_c = torch.cat(final_hidden_c, 0)
-        final_hidden = (final_hidden_h, final_hidden_c)
+        first_layer_hidden_h = torch.cat(final_hidden_h, 0)
+        first_layer_hidden_c = torch.cat(final_hidden_c, 0)
 
         assert seq_input.shape == pred_emb.shape
 
-        return final_hidden, seq_input, penalty, pred_emb
+        hidden_t, last_layer_outputs = self.forward_normal_encoder(seq_input, lengths)
+        final_hidden = (
+        torch.cat([first_layer_hidden_h, hidden_t[0]], 0), torch.cat([first_layer_hidden_c, hidden_t[1]], 0))
+        return final_hidden, last_layer_outputs, penalty, pred_emb
+
+    def forward_normal_encoder(self, emb, lengths):
+        s_len, n_batch, embedding_dim = emb.shape
+        if lengths is not None:
+            n_batch_, = lengths.size()
+            assert n_batch == n_batch_
+
+        packed_emb = emb
+        if lengths is not None:
+            lengths = lengths.view(-1).tolist()
+            packed_emb = pack(emb, lengths)
+
+        outputs, hidden_t = self.rnn(packed_emb, None)
+        if lengths is not None:
+            outputs = unpack(outputs)[0]
+
+        return hidden_t, outputs
 
     def _forward(self, input, input_hashes, lengths, hidden, layer_num=0, forward_rnn=True, apply_dropout=False):
         predicted_embeddings = None
+        input1 = None
+        input2 = None
+        input3 = None
         if layer_num == 0:
             s_len, n_batch = input.size()
+            input1 = self.embeddings1(input)
+            input2 = self.embeddings2(input)
+            input3 = self.embeddings3(input)
+
             predicted_embeddings = torch.zeros((s_len, n_batch, self.embedding_dim), requires_grad=True).cuda()
         else:
             s_len, n_batch, emb_dim = input.size()
@@ -264,7 +297,7 @@ class encoder(nn.Module):
         for i in range(s_len):
             while j >= 0 and lengths[j] < i + 1:
                 j -= 1
-            cur_input = input[i][:j + 1]
+            cur_input = (input1[i][:j + 1], input2[i][:j + 1], input3[i][:j + 1])
             h_0 = h_0[:, :j + 1, :]
             c_0 = c_0[:, :j + 1, :]
             if layer_num == 0:
@@ -309,16 +342,14 @@ class encoder(nn.Module):
     def embedding_attention(self, cur_input, context):
         penalty = None
 
-        emb1 = self.embeddings1(cur_input)
-        emb2 = self.embeddings2(cur_input)
-        emb3 = self.embeddings3(cur_input)
-
-        penalty = torch.sum(F.relu(F.cosine_similarity(emb1, emb2) - 0.3))
-        penalty = penalty + torch.sum(F.relu(F.cosine_similarity(emb1, emb3) - 0.3))
-        penalty = penalty + torch.sum(F.relu(F.cosine_similarity(emb2, emb3) - 0.3))
+        emb1 = cur_input[0]  # self.embeddings1(cur_input)
+        emb2 = cur_input[1]  # self.embeddings2(cur_input)
+        emb3 = cur_input[2]  # self.embeddings3(cur_input)
 
         context = context.squeeze(0)
 
+        penalty = torch.sum(F.relu(F.cosine_similarity(emb1, emb2) - 0.3)) + torch.sum(
+            F.relu(F.cosine_similarity(emb1, emb3) - 0.3)) + torch.sum(F.relu(F.cosine_similarity(emb2, emb3) - 0.3))
         # Bahdanau attention:
         a = self.to_scalar(torch.tanh(self.embedding_transform(emb1) + self.context_transform(context)))
         b = self.to_scalar(torch.tanh(self.embedding_transform(emb2) + self.context_transform(context)))
@@ -407,7 +438,7 @@ class decoderBase(nn.Module):
             )
             self._copy = True
 
-        self.context_dropout = nn.Dropout(0.4)
+        self.context_dropout = nn.Dropout(0.2)
         self.l1 = nn.Linear(self.hidden_size, self.hidden_size)
         self.l2 = nn.Linear(self.hidden_size, self.hidden_size)
         self.l3 = nn.Linear(self.hidden_size, self.hidden_size)
