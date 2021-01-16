@@ -75,7 +75,7 @@
         decay_lrate_steps:
           default: 1000
         steps:
-          default: 20000
+          default: 30000
         lrate_decay:
           default: 0.5
 #        TODO: check warmup steps
@@ -99,14 +99,14 @@
 #          - seq2seq_baseline_word_attn
 #          - seq2seq_multivec
 #          - seq2seq_multivec_word_attn
-          default: "seq2seq_multivec_word_attn"
+          default: "seq2seq_baseline"
         valid_steps:
           default: 250
         patience_steps:
           default: 10
 
         expt_name:
-          default: ""
+          default: "seq2seq_baseline"
 
   references:
     - Some ref

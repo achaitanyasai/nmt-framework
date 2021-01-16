@@ -143,6 +143,7 @@ def initialize_model_parameters(path, model, source_word2idx):
     try:
         for emb_idx in range(1, 4):
             logger.info('Reading %s/emb%d.txt' % (path, emb_idx))
+            is_single = False
             with open('%s/emb%d.txt' % (path, emb_idx)) as f:
                 o = 0
                 for j, line in enumerate(f.readlines()):
@@ -156,16 +157,22 @@ def initialize_model_parameters(path, model, source_word2idx):
                         if 0 == wv[0] and 0 == wv[1] and 0 == wv[2] and 0 == wv[3]:
                             continue
                         idx = source_word2idx[word]
-                        if emb_idx == 1:
-                            model.encoder.embeddings1.weight.data[idx] = torch.tensor(wv).cuda()
-                        elif emb_idx == 2:
-                            model.encoder.embeddings2.weight.data[idx] = torch.tensor(wv).cuda()
-                        elif emb_idx == 3:
-                            model.encoder.embeddings3.weight.data[idx] = torch.tensor(wv).cuda()
-                        else:
-                            assert False
+                        try:
+                            if emb_idx == 1:
+                                model.encoder.embeddings1.weight.data[idx] = torch.tensor(wv).cuda()
+                            elif emb_idx == 2:
+                                model.encoder.embeddings2.weight.data[idx] = torch.tensor(wv).cuda()
+                            elif emb_idx == 3:
+                                model.encoder.embeddings3.weight.data[idx] = torch.tensor(wv).cuda()
+                            else:
+                                assert False
+                        except AttributeError:
+                            model.encoder.embeddings.weight.data[idx] = torch.tensor(wv).cuda()
+                            is_single = True
                 logger.info('Number of words found in monolingual corpus for emb%d: %d out of %d' % (emb_idx, o, len(source_word2idx)))
-    except AttributeError:
+                if is_single:
+                    break
+    except IOError as e:
         pass
 
         # Uncomment below lines to freeze embeddings. It's discouraged to freeze though.
@@ -453,7 +460,7 @@ if __name__ == '__main__':
         disabled = True
 
     experiment = Experiment(api_key="G1Hu2kJ89qGE5sZ1cBNlrq6Hj",
-                            project_name="german-english", workspace="achaitanyasai",
+                            project_name="english-hindi", workspace="achaitanyasai",
                             disabled=disabled)
 
     # experiment.log_asset(file_data='./models/seq2seq_attn.py', file_name='seq2seq_attn.py', overwrite=False)
@@ -463,10 +470,10 @@ if __name__ == '__main__':
     # experiment.add_tag('vector_space=2')
     # experiment.add_tag('UNK percentage=5')
 
-    experiment.add_tag('Bidirectional')
+    # experiment.add_tag('Bidirectional')
     experiment.add_tag('init: uniform')
     experiment.add_tag('%s' % args.model_type)
-    experiment.add_tag('patience-5')
+    experiment.add_tag('patience-10')
     experiment.set_name("%s" % args.expt_name)
     #experiment.add_tag('attn: bahdanau-additive')
     #experiment.add_tag('re-train with much better adagram vectors')
