@@ -460,7 +460,7 @@ if __name__ == '__main__':
         disabled = True
 
     experiment = Experiment(api_key="G1Hu2kJ89qGE5sZ1cBNlrq6Hj",
-                            project_name="english-hindi", workspace="achaitanyasai",
+                            project_name="english-german-iwslt", workspace="achaitanyasai",
                             disabled=disabled)
 
     # experiment.log_asset(file_data='./models/seq2seq_attn.py', file_name='seq2seq_attn.py', overwrite=False)
@@ -471,7 +471,7 @@ if __name__ == '__main__':
     # experiment.add_tag('UNK percentage=5')
 
     # experiment.add_tag('Bidirectional')
-    experiment.add_tag('init: uniform')
+    # experiment.add_tag('init: uniform')
     experiment.add_tag('%s' % args.model_type)
     experiment.add_tag('patience-10')
     experiment.set_name("%s" % args.expt_name)

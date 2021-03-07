@@ -12,19 +12,19 @@
       flags:
         train_dataset:
           description: Path to training corpus in csv file
-          default: "/home/chaitanya/Datasets/english-german/train.en-de.csv"
+          default: "/home/chaitanya/Research/datasets/iwslt14.tokenized.de-en/iwslt14.tokenized.de-en/train.en-de.csv"
         valid_dataset:
           description: Path to validation corpus in csv file
-          default: "/home/chaitanya/Datasets/english-german/valid.en-de.csv"
+          default: "/home/chaitanya/Research/datasets/iwslt14.tokenized.de-en/iwslt14.tokenized.de-en/valid.en-de.csv"
         test_dataset:
           description: Path to test corpus in csv file
-          default: "/home/chaitanya/Datasets/english-german/test.en-de.csv"
+          default: "/home/chaitanya/Research/datasets/iwslt14.tokenized.de-en/iwslt14.tokenized.de-en/test.en-de.csv"
         adagram_embeddings_dir:
           description: Directory containing adagram vectors
-          default: "/home/chaitanya/Research/ShataAnuvadak/_pytorch/all_indian_languages/data/monolingual/english/wmt/"
+          default: "/home/chaitanya/Research/ShataAnuvadak/_pytorch/all_indian_languages/data/monolingual/english/wiki9/"
         testset_target:
           description: Directory containing adagram vectors
-          default: "/home/chaitanya/Datasets/english-german/test.de"
+          default: "/home/chaitanya/Research/datasets/iwslt14.tokenized.de-en/iwslt14.tokenized.de-en/test.de"
         save_to:
           description: Path to test corpus in csv file
           default: "data/model.pt"
@@ -65,9 +65,9 @@
         decoder_attention_type:
           default: "general"
         optimizer:
-          default: "adam"
+          default: "sgd"
         lrate:
-          default: 0.001
+          default: 1.0
         max_grad_norm:
           default: 5.0
         start_decay_at:
@@ -75,7 +75,7 @@
         decay_lrate_steps:
           default: 1000
         steps:
-          default: 25000
+          default: 30000
         lrate_decay:
           default: 0.5
 #        TODO: check warmup steps
@@ -99,7 +99,7 @@
 #          - seq2seq_baseline_word_attn
 #          - seq2seq_multivec
 #          - seq2seq_multivec_word_attn
-          default: "seq2seq_multivec"
+          default: "seq2seq_baseline"
         valid_steps:
           default: 250
         patience_steps:
